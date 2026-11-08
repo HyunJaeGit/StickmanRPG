@@ -119,6 +119,7 @@ var lobby_section := "home"
 var lobby_modal_body: VBoxContainer
 var master_volume_percent := 80
 var settings_volume_label: Label
+var selected_skill_slot := -1
 
 
 func _ready() -> void:
@@ -461,6 +462,8 @@ func _select_lobby_stage(index: int) -> void:
 
 func _open_lobby_window(section: String) -> void:
 	lobby_section = section
+	if section == "skills" and selected_skill_slot < 0:
+		selected_skill_slot = 0
 	for child in overlay_panel.get_children():
 		overlay_panel.remove_child(child)
 		child.queue_free()
@@ -553,44 +556,48 @@ func _build_lobby_section() -> Control:
 	body.add_theme_constant_override("separation", 8)
 	match lobby_section:
 		"armory":
-			var heading := Label.new()
-			heading.text = "무기고  ·  보유 %d개  ·  선택 %s" % [weapon_inventory.size(), RARITY_NAMES[int(_equipped_item().get("rarity", 0))]]
-			body.add_child(heading)
-			var scroll := ScrollContainer.new()
-			scroll.custom_minimum_size.y = 150
-			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-			body.add_child(scroll)
-			var grid := GridContainer.new()
-			grid.columns = 4
-			grid.add_theme_constant_override("h_separation", 4)
-			grid.add_theme_constant_override("v_separation", 4)
-			scroll.add_child(grid)
-			for item in weapon_inventory:
-				var button := Button.new()
-				var weapon_id := str(item.get("weapon_id", "pencil_sword"))
-				var selected := int(item.get("uid", -1)) == selected_weapon_uid
-				button.text = ("✓ " if selected else "") + "%s %s +%d" % [RARITY_NAMES[clampi(int(item.get("rarity", 0)), 0, 4)], _weapon_name(weapon_id), int(item.get("enhancement", 0))]
-				button.custom_minimum_size = Vector2(176, 38)
-				button.icon = _item_icon(_weapon_icon_index(weapon_id))
-				button.add_theme_constant_override("icon_max_width", 24)
-				button.pressed.connect(_equip_weapon_uid.bind(int(item.get("uid", -1))))
-				grid.add_child(button)
-			var details := Label.new()
-			details.text = _potential_summary(_equipped_item())
-			body.add_child(details)
+			var equipped := _equipped_item()
+			var showcase := HBoxContainer.new()
+			showcase.add_theme_constant_override("separation", 12)
+			body.add_child(showcase)
+			var weapon_icon := TextureRect.new()
+			weapon_icon.texture = _item_icon(_weapon_icon_index(selected_weapon))
+			weapon_icon.custom_minimum_size = Vector2(92.0, 92.0)
+			weapon_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			weapon_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			showcase.add_child(weapon_icon)
+			var details := VBoxContainer.new()
+			details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			details.add_theme_constant_override("separation", 3)
+			showcase.add_child(details)
+			var equipped_heading := Label.new()
+			equipped_heading.text = "장착 슬롯  ·  %s" % _weapon_name(selected_weapon)
+			equipped_heading.add_theme_font_size_override("font_size", 20)
+			details.add_child(equipped_heading)
+			var weapon_summary := Label.new()
+			weapon_summary.text = "%s 등급  ·  강화 +%d" % [RARITY_NAMES[int(equipped.get("rarity", 0))], int(equipped.get("enhancement", 0))]
+			details.add_child(weapon_summary)
+			var weapon_description := Label.new()
+			weapon_description.text = _weapon_description(selected_weapon)
+			weapon_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			details.add_child(weapon_description)
+			for line in _potential_lines(equipped):
+				var potential_label := Label.new()
+				potential_label.text = "· " + line
+				details.add_child(potential_label)
 			var actions := HBoxContainer.new()
 			actions.add_theme_constant_override("separation", 5)
 			body.add_child(actions)
 			var enhance := Button.new()
-			var enhance_cost := _enhancement_cost(_equipped_item())
-			var enhance_level := int(_equipped_item().get("enhancement", 0))
+			var enhance_cost := _enhancement_cost(equipped)
+			var enhance_level := int(equipped.get("enhancement", 0))
 			enhance.text = "강화 +%d  ·  %d 골드" % [enhance_level + 1, enhance_cost] if enhance_level < MAX_ENHANCEMENT else "강화 최대"
 			enhance.disabled = enhance_level >= MAX_ENHANCEMENT or gold < enhance_cost
 			enhance.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			enhance.pressed.connect(_enhance_equipped_weapon)
 			actions.add_child(enhance)
 			var reroll := Button.new()
-			var reroll_cost := _potential_reset_cost(_equipped_item())
+			var reroll_cost := _potential_reset_cost(equipped)
 			reroll.text = "잠재 재설정  ·  %d 골드" % reroll_cost
 			reroll.disabled = gold < reroll_cost
 			reroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -598,12 +605,67 @@ func _build_lobby_section() -> Control:
 			actions.add_child(reroll)
 			var synthesize := Button.new()
 			var can_synthesize := _can_synthesize_equipped()
-			var shard_cost := int(_equipped_item().get("rarity", 0)) + 1
+			var shard_cost := int(equipped.get("rarity", 0)) + 1
 			synthesize.text = "동일 무기 합성  ·  조각 %d" % shard_cost
-			synthesize.disabled = not can_synthesize or int(_equipped_item().get("rarity", 0)) >= 4 or weapon_shards < shard_cost
+			synthesize.disabled = not can_synthesize or int(equipped.get("rarity", 0)) >= 4 or weapon_shards < shard_cost
 			synthesize.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			synthesize.pressed.connect(_synthesize_equipped_weapon)
 			actions.add_child(synthesize)
+			var collection_heading := Label.new()
+			collection_heading.text = "무기 도감 및 보유 카피  ·  보유 %d개" % weapon_inventory.size()
+			collection_heading.add_theme_font_size_override("font_size", 17)
+			body.add_child(collection_heading)
+			var collection_scroll := ScrollContainer.new()
+			collection_scroll.custom_minimum_size.y = 190.0
+			collection_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			collection_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+			body.add_child(collection_scroll)
+			var weapon_grid := GridContainer.new()
+			weapon_grid.columns = 3
+			weapon_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			weapon_grid.add_theme_constant_override("h_separation", 8)
+			weapon_grid.add_theme_constant_override("v_separation", 8)
+			collection_scroll.add_child(weapon_grid)
+			for weapon in WEAPONS:
+				var weapon_id := str(weapon.id)
+				var copies: Array[Dictionary] = []
+				for inventory_item in weapon_inventory:
+					if str(inventory_item.get("weapon_id", "")) == weapon_id:
+						copies.append(inventory_item)
+				var card := PanelContainer.new()
+				card.custom_minimum_size = Vector2(214.0, 110.0)
+				if copies.is_empty():
+					card.modulate = Color(0.58, 0.56, 0.52, 0.88)
+				weapon_grid.add_child(card)
+				var card_body := VBoxContainer.new()
+				card_body.add_theme_constant_override("separation", 3)
+				card.add_child(card_body)
+				var weapon_row := HBoxContainer.new()
+				weapon_row.add_theme_constant_override("separation", 5)
+				card_body.add_child(weapon_row)
+				var catalog_icon := TextureRect.new()
+				catalog_icon.texture = _item_icon(_weapon_icon_index(weapon_id))
+				catalog_icon.custom_minimum_size = Vector2(34.0, 34.0)
+				catalog_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				catalog_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				weapon_row.add_child(catalog_icon)
+				var weapon_name := Label.new()
+				weapon_name.text = str(weapon.name)
+				weapon_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+				weapon_row.add_child(weapon_name)
+				if copies.is_empty():
+					var missing := Label.new()
+					missing.text = "미보유"
+					card_body.add_child(missing)
+				else:
+					for copy in copies:
+						var copy_uid := int(copy.get("uid", -1))
+						var copy_button := Button.new()
+						var is_selected := copy_uid == selected_weapon_uid
+						copy_button.text = ("✓ 장착 중  ·  " if is_selected else "장착  ·  ") + "%s  +%d" % [RARITY_NAMES[clampi(int(copy.get("rarity", 0)), 0, 4)], int(copy.get("enhancement", 0))]
+						copy_button.custom_minimum_size.y = 34.0
+						copy_button.pressed.connect(_equip_weapon_uid.bind(copy_uid))
+						card_body.add_child(copy_button)
 		"chest":
 			var heading := Label.new()
 			heading.text = "무기 뽑기  ·  5개 등급"
@@ -620,7 +682,7 @@ func _build_lobby_section() -> Control:
 			body.add_child(button)
 		"skills":
 			var heading := Label.new()
-			heading.text = "스킬 보관함  ·  보유 %d / %d  ·  마력 조각 %d  ·  시전 기능 준비 중" % [skills_owned.size(), SKILLS.size(), magic_shards]
+			heading.text = "보유 스킬 %d / %d  ·  마력 조각 %d" % [skills_owned.size(), SKILLS.size(), magic_shards]
 			body.add_child(heading)
 			var draw_skill := Button.new()
 			draw_skill.text = "스킬 뽑기  ·  마력 조각 %d개" % SKILL_GACHA_COST if skills_owned.size() < SKILLS.size() else "모든 스킬을 획득했습니다"
@@ -629,44 +691,77 @@ func _build_lobby_section() -> Control:
 			draw_skill.disabled = skills_owned.size() >= SKILLS.size() or magic_shards < SKILL_GACHA_COST
 			draw_skill.pressed.connect(_draw_skill)
 			body.add_child(draw_skill)
-			var slots_label := Label.new()
-			var equipped_names := PackedStringArray()
+			var slot_picker := HBoxContainer.new()
+			slot_picker.add_theme_constant_override("separation", 8)
+			body.add_child(slot_picker)
 			for index in 4:
-				var skill_name := _skill_name(equipped_skill_slots[index]) if not equipped_skill_slots[index].is_empty() else "빈 슬롯"
-				equipped_names.append("%s %s" % [["Q", "W", "E", "R"][index], skill_name])
-			slots_label.text = "장착 슬롯  ·  " + "   /   ".join(equipped_names)
-			body.add_child(slots_label)
+				var slot_button := Button.new()
+				var slot_skill_id := equipped_skill_slots[index]
+				var slot_skill_name := _skill_name(slot_skill_id) if not slot_skill_id.is_empty() else "빈 슬롯"
+				slot_button.text = "%s  ·  %s" % [["Q", "W", "E", "R"][index], slot_skill_name]
+				slot_button.custom_minimum_size = Vector2(166.0, 58.0)
+				slot_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				slot_button.add_theme_constant_override("icon_max_width", 30)
+				if not slot_skill_id.is_empty():
+					slot_button.icon = _skill_icon(slot_skill_id)
+				slot_button.tooltip_text = "%s 슬롯: %s" % [["Q", "W", "E", "R"][index], slot_skill_name]
+				var slot_style := _flat_style(Color("f1e4cc") if index == selected_skill_slot else Color("e2d6c2"))
+				slot_style.set_border_width_all(2 if index == selected_skill_slot else 1)
+				slot_style.border_color = Color("9b624b") if index == selected_skill_slot else Color("b7a383")
+				slot_button.add_theme_stylebox_override("normal", slot_style)
+				slot_button.pressed.connect(_select_skill_slot.bind(index))
+				slot_picker.add_child(slot_button)
+			var slot_hint := Label.new()
+			var selected_key: String = ["Q", "W", "E", "R"][selected_skill_slot] if selected_skill_slot >= 0 else ""
+			slot_hint.text = "%s 슬롯 선택됨  ·  아래에서 보유 스킬의 장착 버튼을 누르세요." % selected_key if not selected_key.is_empty() else "먼저 장착할 슬롯을 선택하세요."
+			slot_hint.add_theme_color_override("font_color", Color("8b5947"))
+			body.add_child(slot_hint)
 			var scroll := ScrollContainer.new()
-			scroll.custom_minimum_size.y = 135
+			scroll.custom_minimum_size.y = 205
+			scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 			body.add_child(scroll)
 			var skill_list := VBoxContainer.new()
-			skill_list.add_theme_constant_override("separation", 3)
+			skill_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			skill_list.add_theme_constant_override("separation", 6)
 			scroll.add_child(skill_list)
 			for skill in SKILLS:
+				var skill_id := str(skill.id)
+				var is_owned := skills_owned.has(skill_id)
+				var assigned_slot := equipped_skill_slots.find(skill_id)
+				var assignment_note := ""
+				if assigned_slot >= 0:
+					assignment_note = "  ·  %s 장착 중" % ["Q", "W", "E", "R"][assigned_slot]
 				var row := HBoxContainer.new()
-				row.add_theme_constant_override("separation", 5)
+				row.custom_minimum_size.y = 66.0
+				row.add_theme_constant_override("separation", 10)
+				row.modulate = Color.WHITE if is_owned else Color(0.56, 0.55, 0.52, 0.82)
 				var icon_view := TextureRect.new()
-				icon_view.texture = _skill_icon(str(skill.id))
-				icon_view.custom_minimum_size = Vector2(38.0, 38.0)
+				icon_view.texture = _skill_icon(skill_id)
+				icon_view.custom_minimum_size = Vector2(52.0, 52.0)
 				icon_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 				icon_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-				icon_view.modulate = Color.WHITE if skills_owned.has(str(skill.id)) else Color(0.55, 0.53, 0.48, 0.7)
 				row.add_child(icon_view)
 				var skill_info := Label.new()
 				skill_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				skill_info.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-				skill_info.text = "%s · %s%s\n%s" % [skill.name, skill.role, "  (미보유)" if not skills_owned.has(str(skill.id)) else "", skill.description]
+				skill_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				skill_info.text = "%s  ·  %s%s%s\n%s" % [skill.name, skill.role, "  ·  보유" if is_owned else "  ·  미수집", assignment_note, skill.description]
 				row.add_child(skill_info)
-				for slot_index in 4:
-					var equip_button := Button.new()
-					equip_button.text = ["Q", "W", "E", "R"][slot_index]
-					equip_button.custom_minimum_size = Vector2(36.0, 32.0)
-					equip_button.disabled = not skills_owned.has(str(skill.id))
-					if equipped_skill_slots[slot_index] == str(skill.id):
-						equip_button.text = "✓" + equip_button.text
-					equip_button.pressed.connect(_equip_skill_to_slot.bind(str(skill.id), slot_index))
-					row.add_child(equip_button)
+				var equip_button := Button.new()
+				if not is_owned:
+					equip_button.text = "미수집"
+				elif assigned_slot == selected_skill_slot:
+					equip_button.text = "장착됨"
+				elif assigned_slot >= 0:
+					equip_button.text = "이동"
+				else:
+					equip_button.text = "장착"
+				equip_button.custom_minimum_size = Vector2(88.0, 42.0)
+				equip_button.disabled = not is_owned or selected_skill_slot < 0 or assigned_slot == selected_skill_slot
+				if is_owned and selected_skill_slot >= 0:
+					equip_button.pressed.connect(_equip_skill_to_slot.bind(skill_id, selected_skill_slot))
+				row.add_child(equip_button)
 				skill_list.add_child(row)
 		"settings":
 			var audio_heading := Label.new()
@@ -789,6 +884,13 @@ func _equip_skill_to_slot(skill_id: String, slot_index: int) -> void:
 	_refresh_lobby_window()
 
 
+func _select_skill_slot(slot_index: int) -> void:
+	if slot_index < 0 or slot_index >= equipped_skill_slots.size():
+		return
+	selected_skill_slot = slot_index
+	_refresh_lobby_window()
+
+
 func _equipped_item_index() -> int:
 	for index in weapon_inventory.size():
 		if int(weapon_inventory[index].get("uid", -1)) == selected_weapon_uid:
@@ -799,6 +901,13 @@ func _equipped_item_index() -> int:
 func _equipped_item() -> Dictionary:
 	var index := _equipped_item_index()
 	return weapon_inventory[index] if index >= 0 else {}
+
+
+func _weapon_inventory_index(uid: int) -> int:
+	for index in weapon_inventory.size():
+		if int(weapon_inventory[index].get("uid", -1)) == uid:
+			return index
+	return -1
 
 
 func _equip_weapon_uid(uid: int) -> void:
@@ -831,6 +940,13 @@ func _potential_summary(item: Dictionary) -> String:
 	for potential in item.get("potentials", []):
 		lines.append("%s +%d%%" % [_potential_name(str(potential.get("id", "attack"))), int(potential.get("value", 0))])
 	return "잠재능력  ·  " + "  /  ".join(lines)
+
+
+func _potential_lines(item: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	for potential in item.get("potentials", []):
+		lines.append("%s +%d%%" % [_potential_name(str(potential.get("id", "attack"))), int(potential.get("value", 0))])
+	return lines
 
 
 func _potential_name(id: String) -> String:
@@ -928,64 +1044,76 @@ func _enhance_equipped_weapon() -> void:
 	var index := _equipped_item_index()
 	if index < 0:
 		return
+	var weapon_uid := int(weapon_inventory[index].get("uid", -1))
 	var item: Dictionary = weapon_inventory[index]
-	var level_value := int(item.get("enhancement", 0))
-	var cost := _enhancement_cost(item)
-	if level_value >= MAX_ENHANCEMENT or gold < cost:
-		return
-	var weapon_uid := int(item.uid)
-	var next_level := level_value + 1
-	await reward_presentation.animate_enhancement(_item_icon(_weapon_icon_index(selected_weapon)), _weapon_name(selected_weapon), level_value, next_level)
-	index = -1
-	for item_index in weapon_inventory.size():
-		if int(weapon_inventory[item_index].get("uid", -1)) == weapon_uid:
-			index = item_index
+	reward_presentation.open_enhancement_window(_item_icon(_weapon_icon_index(selected_weapon)), _weapon_name(selected_weapon), int(item.get("enhancement", 0)), _enhancement_cost(item), gold)
+	var action: String = await reward_presentation.weapon_window_action
+	while action != "close":
+		if action == "enhance":
+			index = _weapon_inventory_index(weapon_uid)
+			if index >= 0:
+				item = weapon_inventory[index]
+				var old_level := int(item.get("enhancement", 0))
+				var cost := _enhancement_cost(item)
+				if old_level < MAX_ENHANCEMENT and gold >= cost:
+					await reward_presentation.animate_enhancement_attempt(old_level, old_level + 1)
+					index = _weapon_inventory_index(weapon_uid)
+					if index >= 0 and gold >= cost:
+						item = weapon_inventory[index]
+						gold -= cost
+						item.enhancement = old_level + 1
+						weapon_inventory[index] = item
+						last_lobby_message = "%s 무기 +%d 강화 성공" % [_weapon_name(str(item.get("weapon_id", selected_weapon))), old_level + 1]
+						_save_progress()
+						_refresh_lobby_window()
+						item = weapon_inventory[_weapon_inventory_index(weapon_uid)]
+					reward_presentation.update_enhancement_window(int(item.get("enhancement", 0)), _enhancement_cost(item), gold)
+		index = _weapon_inventory_index(weapon_uid)
+		if index < 0:
 			break
-	if index < 0 or gold < cost:
-		show_lobby()
-		return
-	item = weapon_inventory[index]
-	gold -= cost
-	item.enhancement = next_level
-	weapon_inventory[index] = item
-	last_lobby_message = "%s 무기 +%d 강화 성공" % [_weapon_name(selected_weapon), next_level]
-	_save_progress()
-	reward_presentation.show_result("강화 성공!  +%d" % next_level, "%s 무기의 공격력이 상승했습니다." % _weapon_name(selected_weapon), _item_icon(_weapon_icon_index(selected_weapon)), Color("d99a48"))
+		item = weapon_inventory[index]
+		var current_level := int(item.get("enhancement", 0))
+		reward_presentation.update_enhancement_window(current_level, _enhancement_cost(item), gold)
+		action = await reward_presentation.weapon_window_action
 
 
 func _reset_equipped_potentials() -> void:
 	var index := _equipped_item_index()
 	if index < 0:
 		return
+	var weapon_uid := int(weapon_inventory[index].get("uid", -1))
 	var item: Dictionary = weapon_inventory[index]
 	var cost := _potential_reset_cost(item)
-	if gold < cost:
-		return
-	var weapon_uid := int(item.uid)
-	var accepted: bool = await reward_presentation.confirm_potential_reset(_potential_summary(item), cost, _item_icon(_weapon_icon_index(selected_weapon)))
-	if not accepted:
-		_refresh_lobby_window()
-		return
-	var preview_lines: Array[String] = []
-	for spin in 9:
-		preview_lines.append(_potential_summary({"potentials":_roll_potentials()}))
-	await reward_presentation.animate_potential_roll(_item_icon(_weapon_icon_index(selected_weapon)), preview_lines)
-	var new_potentials := _roll_potentials()
-	index = -1
-	for item_index in weapon_inventory.size():
-		if int(weapon_inventory[item_index].get("uid", -1)) == weapon_uid:
-			index = item_index
-			break
-	if index < 0 or gold < cost:
-		show_lobby()
-		return
-	item = weapon_inventory[index]
-	gold -= cost
-	item.potentials = new_potentials
-	weapon_inventory[index] = item
-	last_lobby_message = "%s 무기의 잠재능력 3줄을 다시 설정했습니다." % _weapon_name(selected_weapon)
-	_save_progress()
-	reward_presentation.show_result("새 잠재능력이 적용됐습니다", _potential_summary(item), _item_icon(_weapon_icon_index(selected_weapon)), Color("8b73bd"))
+	reward_presentation.open_potential_cube_window(_item_icon(_weapon_icon_index(selected_weapon)), _weapon_name(selected_weapon), _potential_lines(item), cost, gold)
+	var action: String = await reward_presentation.weapon_window_action
+	while action != "stop" and action != "close":
+		if action == "roll":
+			index = _weapon_inventory_index(weapon_uid)
+			if index >= 0:
+				item = weapon_inventory[index]
+				cost = _potential_reset_cost(item)
+				if gold >= cost:
+					var new_potentials := _roll_potentials()
+					var new_lines: Array[String] = []
+					for potential in new_potentials:
+						new_lines.append("%s +%d%%" % [_potential_name(str(potential.id)), int(potential.value)])
+					await reward_presentation.animate_cube_roll(new_lines)
+					index = _weapon_inventory_index(weapon_uid)
+					if index >= 0 and gold >= cost:
+						item = weapon_inventory[index]
+						gold -= cost
+						item.potentials = new_potentials
+						weapon_inventory[index] = item
+						last_lobby_message = "%s 무기의 잠재능력을 재설정했습니다." % _weapon_name(str(item.get("weapon_id", selected_weapon)))
+						_save_progress()
+						_refresh_lobby_window()
+						item = weapon_inventory[_weapon_inventory_index(weapon_uid)]
+						reward_presentation.update_potential_cube_window(_potential_lines(item), _potential_reset_cost(item), gold)
+			index = _weapon_inventory_index(weapon_uid)
+			if index >= 0:
+				item = weapon_inventory[index]
+				reward_presentation.update_potential_cube_window(_potential_lines(item), _potential_reset_cost(item), gold)
+		action = await reward_presentation.weapon_window_action
 
 
 func _synthesize_equipped_weapon() -> void:

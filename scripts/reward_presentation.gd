@@ -4,10 +4,22 @@ class_name RewardPresentation
 
 signal closed
 signal decision_made(confirmed: bool)
+signal weapon_window_action(action: String)
 
 var shade: ColorRect
 var panel: PanelContainer
 var rng := RandomNumberGenerator.new()
+var enhancement_icon: TextureRect
+var enhancement_progress: ProgressBar
+var enhancement_status: Label
+var enhancement_summary: Label
+var enhancement_button: Button
+var enhancement_close_button: Button
+var cube_line_labels: Array[Label] = []
+var cube_cost_label: Label
+var cube_status: Label
+var cube_roll_button: Button
+var cube_stop_button: Button
 
 
 func _ready() -> void:
@@ -150,6 +162,169 @@ func animate_potential_roll(weapon_icon: Texture2D, preview_lines: Array[String]
 		icon.rotation = float(spin % 2) * 0.12 - 0.06
 		icon.scale = Vector2.ONE * (0.92 if spin % 2 == 0 else 1.06)
 		await get_tree().create_timer(0.09).timeout
+
+
+func open_enhancement_window(weapon_icon: Texture2D, weapon_name: String, level: int, cost: int, gold: int) -> void:
+	panel.custom_minimum_size = Vector2(560.0, 410.0)
+	var content := _begin("무기 강화", "STAR FORCE  ·  별을 쌓아 무기를 성장시킵니다", Color("d99a48"))
+	var icon_row := HBoxContainer.new()
+	icon_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	content.add_child(icon_row)
+	enhancement_icon = _add_icon(icon_row, weapon_icon, Vector2(104.0, 104.0))
+	var name_label := Label.new()
+	name_label.text = weapon_name
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 19)
+	content.add_child(name_label)
+	enhancement_status = Label.new()
+	enhancement_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(enhancement_status)
+	var star_strip := Label.new()
+	star_strip.name = "StarStrip"
+	star_strip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	star_strip.add_theme_font_size_override("font_size", 18)
+	content.add_child(star_strip)
+	enhancement_progress = ProgressBar.new()
+	enhancement_progress.custom_minimum_size = Vector2(380.0, 18.0)
+	enhancement_progress.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	enhancement_progress.max_value = 20.0
+	enhancement_progress.show_percentage = false
+	enhancement_progress.add_theme_stylebox_override("fill", _flat_style(Color("d99a48")))
+	content.add_child(enhancement_progress)
+	enhancement_summary = Label.new()
+	enhancement_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(enhancement_summary)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 10)
+	content.add_child(actions)
+	enhancement_button = Button.new()
+	enhancement_button.text = "강화 시도"
+	enhancement_button.custom_minimum_size.y = 48.0
+	enhancement_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	enhancement_button.pressed.connect(func(): weapon_window_action.emit("enhance"))
+	actions.add_child(enhancement_button)
+	enhancement_close_button = Button.new()
+	enhancement_close_button.text = "닫기"
+	enhancement_close_button.custom_minimum_size.y = 48.0
+	enhancement_close_button.pressed.connect(_close_weapon_window)
+	actions.add_child(enhancement_close_button)
+	update_enhancement_window(level, cost, gold)
+
+
+func update_enhancement_window(level: int, cost: int, gold: int) -> void:
+	if not is_instance_valid(enhancement_status):
+		return
+	var safe_level := clampi(level, 0, 20)
+	enhancement_status.text = "현재 강화 +%d   →   다음 강화 +%d" % [safe_level, mini(safe_level + 1, 20)]
+	var star_strip := panel.find_child("StarStrip", true, false) as Label
+	if star_strip != null:
+		star_strip.text = "★".repeat(safe_level) + "☆".repeat(20 - safe_level)
+	enhancement_progress.value = safe_level
+	enhancement_summary.text = "보유 골드  %d     ·     다음 시도 비용  %d 골드" % [gold, cost]
+	enhancement_button.text = "강화 시도  ·  %d 골드" % cost if safe_level < 20 else "강화 최대 단계"
+	enhancement_button.disabled = safe_level >= 20 or gold < cost
+
+
+func animate_enhancement_attempt(old_level: int, next_level: int) -> void:
+	_enhancement_set_busy(true)
+	for step in 10:
+		enhancement_progress.value = float(old_level) + float(step + 1) / 10.0
+		enhancement_status.text = ["별의 기운을 모읍니다", "강화석을 두드립니다", "무기에 힘을 새깁니다", "강화 성공!"][mini(3, step / 3)]
+		enhancement_icon.rotation = rng.randf_range(-0.08, 0.08)
+		enhancement_icon.scale = Vector2.ONE * rng.randf_range(0.94, 1.07)
+		await get_tree().create_timer(0.075).timeout
+	enhancement_icon.rotation = 0.0
+	enhancement_icon.scale = Vector2.ONE
+	enhancement_status.text = "+%d 강화 성공!" % next_level
+	await get_tree().create_timer(0.24).timeout
+	enhancement_close_button.disabled = false
+
+
+func _enhancement_set_busy(busy: bool) -> void:
+	if busy and is_instance_valid(enhancement_button):
+		enhancement_button.disabled = true
+	if is_instance_valid(enhancement_close_button):
+		enhancement_close_button.disabled = busy
+
+
+func open_potential_cube_window(weapon_icon: Texture2D, weapon_name: String, lines: Array[String], cost: int, gold: int) -> void:
+	panel.custom_minimum_size = Vector2(560.0, 440.0)
+	var content := _begin("잠재능력 큐브", "%s  ·  한 번 사용할 때마다 골드가 소모됩니다" % weapon_name, Color("8b73bd"))
+	cube_line_labels.clear()
+	_add_icon(content, weapon_icon, Vector2(72.0, 72.0))
+	var line_stack := VBoxContainer.new()
+	line_stack.add_theme_constant_override("separation", 8)
+	content.add_child(line_stack)
+	for index in 3:
+		var line_panel := PanelContainer.new()
+		line_panel.custom_minimum_size = Vector2(430.0, 48.0)
+		line_panel.add_theme_stylebox_override("panel", _flat_style(Color("e8dcc7")))
+		line_stack.add_child(line_panel)
+		var line_label := Label.new()
+		line_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		line_label.add_theme_font_size_override("font_size", 17)
+		line_panel.add_child(line_label)
+		cube_line_labels.append(line_label)
+	cube_status = Label.new()
+	cube_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(cube_status)
+	cube_cost_label = Label.new()
+	cube_cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content.add_child(cube_cost_label)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 10)
+	content.add_child(actions)
+	cube_roll_button = Button.new()
+	cube_roll_button.text = "큐브 사용"
+	cube_roll_button.custom_minimum_size.y = 48.0
+	cube_roll_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cube_roll_button.pressed.connect(func(): weapon_window_action.emit("roll"))
+	actions.add_child(cube_roll_button)
+	cube_stop_button = Button.new()
+	cube_stop_button.text = "그만하기"
+	cube_stop_button.custom_minimum_size.y = 48.0
+	cube_stop_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cube_stop_button.pressed.connect(_stop_cube_window)
+	actions.add_child(cube_stop_button)
+	update_potential_cube_window(lines, cost, gold)
+
+
+func update_potential_cube_window(lines: Array[String], cost: int, gold: int) -> void:
+	for index in mini(3, cube_line_labels.size()):
+		cube_line_labels[index].text = "잠재능력 %d  ·  %s" % [index + 1, lines[index]]
+	cube_cost_label.text = "보유 골드  %d     ·     큐브 비용  %d 골드" % [gold, cost]
+	cube_status.text = "새 잠재능력은 즉시 무기에 적용됩니다. 결과가 마음에 들면 그만두세요."
+	cube_roll_button.text = "한 번 더 돌리기  ·  %d 골드" % cost
+	cube_roll_button.disabled = gold < cost
+
+
+func animate_cube_roll(lines: Array[String]) -> void:
+	cube_roll_button.disabled = true
+	cube_stop_button.disabled = true
+	cube_status.text = "잠재능력을 다시 조합합니다..."
+	for index in 3:
+		var line_label := cube_line_labels[index]
+		for spin in 5:
+			line_label.text = "잠재능력 %d  ·  옵션 탐색%s" % [index + 1, ".".repeat(spin % 3 + 1)]
+			line_label.modulate = Color("b49acb")
+			await get_tree().create_timer(0.055).timeout
+		line_label.text = "잠재능력 %d  ·  %s" % [index + 1, lines[index]]
+		line_label.modulate = Color.WHITE
+		await get_tree().create_timer(0.14).timeout
+		cube_status.text = "새 능력 %d / 3 적용 중" % (index + 1)
+	cube_status.text = "새 잠재능력이 적용됐습니다. 계속 돌리거나 그만둘 수 있습니다."
+	cube_stop_button.disabled = false
+
+
+func _stop_cube_window() -> void:
+	weapon_window_action.emit("stop")
+	_close_weapon_window()
+
+
+func _close_weapon_window() -> void:
+	shade.hide()
+	weapon_window_action.emit("close")
+	closed.emit()
 
 
 func show_result(title: String, description: String, icon_texture: Texture2D, accent: Color = Color("d6b251")) -> void:
