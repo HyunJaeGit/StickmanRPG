@@ -3,18 +3,7 @@ extends Node2D
 
 const W := 960.0
 const H := 540.0
-const STAGE_IDS := ["1-1", "1-2", "1-3", "1-4", "1-5", "2-1"]
-const STAGE_ENEMY_COUNTS := {"1-1":24, "1-2":30, "1-3":36, "1-4":42, "1-5":36, "2-1":48}
-const BOSS_STAGES := ["1-5"]
-const GACHA_COST := 5
-const SKILL_GACHA_COST := 3
-const MAGIC_SHARD_DROP_CHANCE := 0.04
-const MAX_ENHANCEMENT := 20
-const DASH_SKILL_ID := "dash_impact"
-const DASH_COOLDOWN_DURATION := 2.5
-const RARITY_NAMES := ["일반", "고급", "레어", "유니크", "전설"]
-const RARITY_DAMAGE := [1.0, 1.1, 1.22, 1.38, 1.58]
-const RARITY_CHANCES := [60, 25, 10, 4, 1]
+const GAME_DATA = preload("res://scripts/game_data.gd")
 const RENDERER_SCENE: PackedScene = preload("res://scenes/game_renderer.tscn")
 const REWARD_PRESENTATION_SCENE: PackedScene = preload("res://scenes/reward_presentation.tscn")
 const CHARACTER_ATLAS: Texture2D = preload("res://art/stickman_characters_atlas.png")
@@ -26,38 +15,6 @@ const ITEM_CELL := 362.0
 const MAGIC_SKILL_CELL := Vector2(2172.0 / 5.0, 434.0)
 const MAGIC_SKILL_REGION_Y := 145.0
 const ACTION_FRAME_SIZE := Vector2(362.0, 271.5)
-const WEAPONS := [
-	{"id":"pencil_sword", "name":"연필검", "desc":"근접 단일 공격 · 가장 가까운 적 1명", "damage_ratio":1.0},
-	{"id":"ink_orb", "name":"먹물 구슬", "desc":"유도 투사체 · 적 1명", "damage_ratio":1.0},
-	{"id":"orbit_line", "name":"회전 선분", "desc":"근접 회전 공격 · 반경 58 안 적 전체", "damage_ratio":0.8},
-	{"id":"ruler_spear", "name":"자 대검", "desc":"직선 관통 공격 · 궤적 위 적 전체", "damage_ratio":1.25},
-	{"id":"brush_burst", "name":"붓 폭발탄", "desc":"부채꼴 3발 발사 · 발당 피해", "damage_ratio":0.55},
-	{"id":"eraser_bomb", "name":"지우개 폭탄", "desc":"지연 폭발 · 반경 78 안 적 전체", "damage_ratio":1.55},
-	{"id":"paper_plane", "name":"종이비행기", "desc":"투척 후 귀환 · 첫 적 1명", "damage_ratio":0.9},
-	{"id":"compass_spear", "name":"컴퍼스 창", "desc":"장거리 직선 관통 · 궤적 위 적 전체", "damage_ratio":1.65},
-	{"id":"stamp_fist", "name":"도장 주먹", "desc":"범위 타격 · 목표 반경 88 안 적 전체", "damage_ratio":1.3}
-]
-const POTENTIALS := [
-	{"id":"attack", "name":"공격력", "min":3, "max":8},
-	{"id":"attack_speed", "name":"공격 속도", "min":2, "max":6},
-	{"id":"gold_gain", "name":"골드 획득량", "min":5, "max":12},
-	{"id":"fragment_find", "name":"무기 조각 발견률", "min":1, "max":3},
-	{"id":"max_health", "name":"최대 체력", "min":5, "max":10},
-	{"id":"move_speed", "name":"이동 속도", "min":2, "max":5}
-]
-const SKILLS := [
-	{"id":"ink_wave", "name":"잉크 파동", "role":"범위 공격", "description":"반경 140 안 적 전체", "icon":0, "cooldown":18.0, "radius":140.0, "damage_ratio":1.2},
-	{"id":"compass_pierce", "name":"컴퍼스 관통", "role":"단일 공격", "description":"가장 가까운 적 1명", "icon":1, "cooldown":14.0, "damage_ratio":3.0},
-	{"id":"lifeline", "name":"생명선", "role":"회복", "description":"최대 체력 비례 회복", "icon":2, "cooldown":40.0, "heal_ratio":0.3},
-	{"id":"final_ink", "name":"종말의 획", "role":"단일 공격", "description":"1초 집중 후 가장 가까운 적 1명", "icon":3, "cooldown":60.0, "charge_time":1.0, "damage_ratio":7.0},
-	{"id":DASH_SKILL_ID, "name":"질주 충격", "role":"패시브", "description":"Space 대시 경로의 적 전체", "icon":-1, "passive":true, "damage_ratio":1.35}
-]
-const ENEMY_DATA := {
-	"chaser": {"hp":40.0, "speed":48.0, "damage":9.0, "radius":13.0, "color":Color("33302b")},
-	"charger": {"hp":68.0, "speed":39.0, "damage":15.0, "radius":15.0, "color":Color("704d37")},
-	"thrower": {"hp":52.0, "speed":30.0, "damage":8.0, "radius":14.0, "color":Color("526e68")},
-	"elite": {"hp":330.0, "speed":34.0, "damage":20.0, "radius":23.0, "color":Color("a74235")}
-}
 
 var mode := "lobby"
 var stage_index := 0
@@ -78,7 +35,7 @@ var cleared_stages: Array[String] = []
 var last_lobby_message := "스케치 세계에 오신 것을 환영합니다."
 var elapsed := 0.0
 var kills := 0
-var stage_enemy_quota := 24
+var stage_enemy_quota: int = int(GAME_DATA.STAGE_ENEMY_COUNTS["1-1"])
 var stage_enemies_spawned := 0
 var stage_boss_spawned := false
 var spawn_timer := 0.0
@@ -92,12 +49,23 @@ var player_anim_time := 0.0
 var player_anim_duration := 0.36
 var player_anim_uses_weapon_atlas := false
 var dash_origin := Vector2.ZERO
+var attack_indicator_timer := 0.0
+var attack_indicator_range := 0.0
+var attack_indicator_direction := Vector2.RIGHT
+var attack_indicator_target := Vector2.ZERO
+var attack_indicator_area_radius := 0.0
+var attack_indicator_area_center := "target"
+var skill_cast_id := ""
+var skill_cast_timer := 0.0
+var skill_cast_duration := 0.0
+var skill_cast_target := Vector2.ZERO
+var skill_cast_target_ref: Dictionary = {}
 var player_position := Vector2(W / 2.0, H / 2.0)
-var player_hp := 100.0
-var player_max_hp := 100.0
-var player_speed := 190.0
-var player_damage := 25.0
-var attack_rate := 0.72
+var player_hp := GAME_DATA.PLAYER_BASE_HEALTH
+var player_max_hp := GAME_DATA.PLAYER_BASE_HEALTH
+var player_speed := GAME_DATA.PLAYER_BASE_SPEED
+var player_damage := GAME_DATA.PLAYER_BASE_DAMAGE
+var attack_rate := GAME_DATA.PLAYER_BASE_ATTACK_INTERVAL
 var facing := 1.0
 var enemies: Array[Dictionary] = []
 var drops: Array[Dictionary] = []
@@ -118,6 +86,7 @@ var lobby_status: Label
 var lobby_stage_label: Label
 var lobby_weapon_label: Label
 var lobby_weapon_desc: Label
+var lobby_stat_values: Dictionary = {}
 var lobby_message: Label
 var lobby_stage_path: HBoxContainer
 var lobby_enter_button: Button
@@ -323,6 +292,29 @@ func _show_panel(title: String, body: String, button_text: String, callback: Cal
 	overlay.show()
 
 
+func _show_catalog_info(title: String, body: String) -> void:
+	var dialog := AcceptDialog.new()
+	dialog.title = title
+	dialog.dialog_text = body
+	ui.add_child(dialog)
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.close_requested.connect(dialog.queue_free)
+	dialog.popup_centered(Vector2i(480, 260))
+
+
+func _show_unowned_weapon_info(weapon_id: String) -> void:
+	var weapon := _weapon_profile(weapon_id)
+	var ratio := float(weapon.get("damage_ratio", 1.0))
+	var info := "%s\n사거리 %.0f\n공격 계수 %.0f%% · 일반 등급 기준 피해 %.1f\n%s\n\n미보유 무기입니다. 획득하면 무기고에서 장착할 수 있습니다." % [str(weapon.get("name", "무기")), _weapon_attack_range(weapon_id), ratio * 100.0, GAME_DATA.PLAYER_BASE_DAMAGE * ratio, str(weapon.get("desc", ""))]
+	_show_catalog_info("무기 정보", info)
+
+
+func _show_unowned_skill_info(skill: Dictionary) -> void:
+	var skill_level := 1
+	var info := "%s · %s\n%s\n\n미수집 스킬입니다. 획득하면 보관함에서 슬롯에 장착할 수 있습니다." % [str(skill.get("name", "스킬")), str(skill.get("role", "")), _skill_description(skill, skill_level)]
+	_show_catalog_info("스킬 정보", info)
+
+
 func show_lobby() -> void:
 	mode = "lobby"
 	lobby_section = "home"
@@ -334,20 +326,20 @@ func show_lobby() -> void:
 	lobby_style.set_border_width_all(1)
 	lobby_style.content_margin_left = 24.0
 	lobby_style.content_margin_right = 24.0
-	lobby_style.content_margin_top = 18.0
-	lobby_style.content_margin_bottom = 18.0
+	lobby_style.content_margin_top = 14.0
+	lobby_style.content_margin_bottom = 14.0
 	overlay_panel.add_theme_stylebox_override("panel", lobby_style)
 	for child in overlay_panel.get_children():
 		overlay_panel.remove_child(child)
 		child.queue_free()
 	var lobby_view_size := get_viewport().get_visible_rect().size
-	overlay_panel.custom_minimum_size = Vector2(minf(840.0, lobby_view_size.x - 64.0), minf(430.0, lobby_view_size.y - 64.0))
+	overlay_panel.custom_minimum_size = Vector2(minf(840.0, lobby_view_size.x - 64.0), minf(450.0, lobby_view_size.y - 64.0))
 	overlay_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var frame := VBoxContainer.new()
-	frame.add_theme_constant_override("separation", 12)
+	frame.add_theme_constant_override("separation", 8)
 	overlay_panel.add_child(frame)
 	var top := HBoxContainer.new()
-	top.custom_minimum_size.y = 46.0
+	top.custom_minimum_size.y = 42.0
 	top.add_theme_constant_override("separation", 12)
 	frame.add_child(top)
 	var title := Label.new()
@@ -366,16 +358,16 @@ func show_lobby() -> void:
 	var divider := HSeparator.new()
 	frame.add_child(divider)
 	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 18)
+	main.add_theme_constant_override("separation", 12)
 	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	frame.add_child(main)
 	var showcase := VBoxContainer.new()
 	showcase.custom_minimum_size.x = 240
 	showcase.alignment = BoxContainer.ALIGNMENT_CENTER
-	showcase.add_theme_constant_override("separation", 8)
+	showcase.add_theme_constant_override("separation", 3)
 	main.add_child(showcase)
 	var portrait := PanelContainer.new()
-	portrait.custom_minimum_size = Vector2(220, 160)
+	portrait.custom_minimum_size = Vector2(220, 100)
 	portrait.add_theme_stylebox_override("panel", _flat_style(Color("e8dcc7")))
 	var hero_preview := TextureRect.new()
 	var hero_atlas := AtlasTexture.new()
@@ -393,10 +385,46 @@ func show_lobby() -> void:
 	lobby_weapon_desc = Label.new()
 	lobby_weapon_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lobby_weapon_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lobby_weapon_desc.add_theme_font_size_override("font_size", 14)
 	showcase.add_child(lobby_weapon_desc)
+	lobby_stat_values.clear()
+	var stats_card := _lobby_card(showcase, Color("f7efdf"), Color("c7b58d"))
+	var stats_style := _lobby_surface(Color("f7efdf"), Color("c7b58d"))
+	stats_style.content_margin_left = 10.0
+	stats_style.content_margin_right = 10.0
+	stats_style.content_margin_top = 5.0
+	stats_style.content_margin_bottom = 5.0
+	stats_card.add_theme_stylebox_override("panel", stats_style)
+	var stats_column := VBoxContainer.new()
+	stats_column.add_theme_constant_override("separation", 2)
+	stats_card.add_child(stats_column)
+	var stats_title := Label.new()
+	stats_title.text = "전투 스탯"
+	stats_title.add_theme_font_size_override("font_size", 14)
+	stats_title.add_theme_color_override("font_color", Color("766650"))
+	stats_column.add_child(stats_title)
+	var stats_grid := GridContainer.new()
+	stats_grid.columns = 2
+	stats_grid.add_theme_constant_override("h_separation", 10)
+	stats_grid.add_theme_constant_override("v_separation", 1)
+	stats_column.add_child(stats_grid)
+	for stat in [{"id":"health", "title":"최대 체력"}, {"id":"damage", "title":"공격력"}, {"id":"speed", "title":"이동 속도"}, {"id":"attack_rate", "title":"초당 공격"}]:
+		var stat_cell := VBoxContainer.new()
+		stat_cell.add_theme_constant_override("separation", 0)
+		stats_grid.add_child(stat_cell)
+		var stat_title := Label.new()
+		stat_title.text = str(stat.title)
+		stat_title.add_theme_font_size_override("font_size", 12)
+		stat_title.add_theme_color_override("font_color", Color("766f63"))
+		stat_cell.add_child(stat_title)
+		var stat_value := Label.new()
+		stat_value.add_theme_font_size_override("font_size", 14)
+		stat_value.add_theme_color_override("font_color", Color("3a342d"))
+		stat_cell.add_child(stat_value)
+		lobby_stat_values[str(stat.id)] = stat_value
 	var center := VBoxContainer.new()
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center.add_theme_constant_override("separation", 8)
+	center.add_theme_constant_override("separation", 5)
 	main.add_child(center)
 	lobby_stage_label = Label.new()
 	lobby_stage_label.add_theme_font_size_override("font_size", 22)
@@ -414,13 +442,14 @@ func show_lobby() -> void:
 	lobby_message.add_theme_color_override("font_color", Color("8b5947"))
 	center.add_child(lobby_message)
 	var enter := Button.new()
-	enter.text = "%s  출전하기" % STAGE_IDS[stage_index]
+	enter.text = "%s  출전하기" % GAME_DATA.STAGE_IDS[stage_index]
 	enter.custom_minimum_size.y = 58
 	enter.add_theme_font_size_override("font_size", 22)
 	enter.pressed.connect(start_run)
 	center.add_child(enter)
 	lobby_enter_button = enter
 	var nav := HBoxContainer.new()
+	nav.custom_minimum_size.y = 50.0
 	nav.add_theme_constant_override("separation", 10)
 	frame.add_child(nav)
 	var armory := Button.new()
@@ -459,17 +488,18 @@ func _update_lobby() -> void:
 		return
 	lobby_status.text = "골드 %d  ·  무기 조각 %d  ·  마력 조각 %d" % [gold, weapon_shards, magic_shards]
 	lobby_gacha_button.text = "▣  무기 뽑기  ·  %d 조각" % weapon_shards
-	lobby_stage_label.text = "현재 출전 단계   %s" % STAGE_IDS[stage_index]
-	lobby_enter_button.text = "%s  출전하기" % STAGE_IDS[stage_index]
+	lobby_stage_label.text = "현재 출전 단계   %s" % GAME_DATA.STAGE_IDS[stage_index]
+	lobby_enter_button.text = "%s  출전하기" % GAME_DATA.STAGE_IDS[stage_index]
 	lobby_weapon_label.text = "장착 무기  ·  %s" % _weapon_name(selected_weapon)
 	lobby_weapon_desc.text = _weapon_description(selected_weapon)
+	_update_lobby_stats()
 	lobby_message.text = last_lobby_message
 	for child in lobby_stage_path.get_children():
 		lobby_stage_path.remove_child(child)
 		child.queue_free()
-	for index in STAGE_IDS.size():
+	for index in GAME_DATA.STAGE_IDS.size():
 		var node := Button.new()
-		var stage_id: String = STAGE_IDS[index]
+		var stage_id: String = GAME_DATA.STAGE_IDS[index]
 		var cleared := cleared_stages.has(stage_id)
 		var current := index == stage_index
 		var unlocked := index <= furthest_stage_index or current
@@ -482,13 +512,42 @@ func _update_lobby() -> void:
 		lobby_stage_path.add_child(node)
 
 
+func _update_lobby_stats() -> void:
+	var item := _equipped_item()
+	lobby_stat_values["health"].text = "%.0f" % _player_max_health_for_item(item)
+	lobby_stat_values["damage"].text = "%.1f" % _weapon_attack_power(item)
+	lobby_stat_values["speed"].text = "%.0f" % _player_move_speed_for_item(item)
+	lobby_stat_values["attack_rate"].text = "%.1f회/초" % (1.0 / _player_attack_interval_for_item(item))
+
+
+func _player_max_health_for_item(item: Dictionary) -> float:
+	return GAME_DATA.PLAYER_BASE_HEALTH * (1.0 + _potential_total(item, "max_health") / 100.0)
+
+
+func _player_move_speed_for_item(item: Dictionary) -> float:
+	return GAME_DATA.PLAYER_BASE_SPEED * (1.0 + _potential_total(item, "move_speed") / 100.0)
+
+
+func _player_attack_interval_for_item(item: Dictionary) -> float:
+	return GAME_DATA.PLAYER_BASE_ATTACK_INTERVAL * 100.0 / (100.0 + _potential_total(item, "attack_speed"))
+
+
+func _weapon_profile(weapon_id: String) -> Dictionary:
+	for weapon in GAME_DATA.WEAPONS:
+		if str(weapon.id) == weapon_id:
+			return weapon
+	return GAME_DATA.WEAPONS[0]
+
+
+func _weapon_attack_range(weapon_id: String) -> float:
+	return float(_weapon_profile(weapon_id).get("attack_range", 470.0))
+
+
 func _weapon_description(weapon_id: String) -> String:
-	for weapon in WEAPONS:
-		if weapon.id == weapon_id:
-			var attack_power := _weapon_attack_power(_equipped_item())
-			var damage_ratio := float(weapon.get("damage_ratio", 1.0))
-			return "%s  ·  공격력 %.0f%% / %.1f 피해" % [str(weapon.desc), damage_ratio * 100.0, attack_power * damage_ratio]
-	return "기본 무기"
+	var weapon := _weapon_profile(weapon_id)
+	var attack_power := _weapon_attack_power(_equipped_item())
+	var damage_ratio := float(weapon.get("damage_ratio", 1.0))
+	return "%s\n사거리 %.0f  ·  공격력 %.0f%% / %.1f 피해" % [str(weapon.desc), _weapon_attack_range(weapon_id), damage_ratio * 100.0, attack_power * damage_ratio]
 
 
 func _select_lobby_stage(index: int) -> void:
@@ -650,7 +709,7 @@ func _build_lobby_section() -> Control:
 			equipped_heading.add_theme_font_size_override("font_size", 18)
 			details.add_child(equipped_heading)
 			var weapon_summary := Label.new()
-			weapon_summary.text = "%s 등급  ·  강화 +%d  ·  기본 공격력 %.1f" % [RARITY_NAMES[int(equipped.get("rarity", 0))], int(equipped.get("enhancement", 0)), _weapon_attack_power(equipped)]
+			weapon_summary.text = "%s 등급  ·  강화 +%d  ·  기본 공격력 %.1f" % [GAME_DATA.RARITY_NAMES[int(equipped.get("rarity", 0))], int(equipped.get("enhancement", 0)), _weapon_attack_power(equipped)]
 			details.add_child(weapon_summary)
 			var weapon_description := Label.new()
 			weapon_description.text = _weapon_description(selected_weapon)
@@ -668,8 +727,8 @@ func _build_lobby_section() -> Control:
 			var enhance := Button.new()
 			var enhance_cost := _enhancement_cost(equipped)
 			var enhance_level := int(equipped.get("enhancement", 0))
-			enhance.text = "강화 +%d  ·  %d 골드" % [enhance_level + 1, enhance_cost] if enhance_level < MAX_ENHANCEMENT else "강화 최대"
-			enhance.disabled = enhance_level >= MAX_ENHANCEMENT or gold < enhance_cost
+			enhance.text = "강화 +%d  ·  %d 골드" % [enhance_level + 1, enhance_cost] if enhance_level < GAME_DATA.MAX_ENHANCEMENT else "강화 최대"
+			enhance.disabled = enhance_level >= GAME_DATA.MAX_ENHANCEMENT or gold < enhance_cost
 			enhance.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			enhance.pressed.connect(_enhance_equipped_weapon)
 			actions.add_child(enhance)
@@ -702,7 +761,7 @@ func _build_lobby_section() -> Control:
 			weapon_grid.add_theme_constant_override("h_separation", 8)
 			weapon_grid.add_theme_constant_override("v_separation", 8)
 			collection_scroll.add_child(weapon_grid)
-			for weapon in WEAPONS:
+			for weapon in GAME_DATA.WEAPONS:
 				var weapon_id := str(weapon.id)
 				var copies: Array[Dictionary] = []
 				for inventory_item in weapon_inventory:
@@ -729,15 +788,17 @@ func _build_lobby_section() -> Control:
 				weapon_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 				weapon_row.add_child(weapon_name)
 				if copies.is_empty():
-					var missing := Label.new()
-					missing.text = "미보유"
+					var missing := Button.new()
+					missing.text = "미보유 · 정보 보기"
+					missing.custom_minimum_size.y = 28.0
+					missing.pressed.connect(_show_unowned_weapon_info.bind(weapon_id))
 					card_body.add_child(missing)
 				else:
 					for copy in copies:
 						var copy_uid := int(copy.get("uid", -1))
 						var copy_button := Button.new()
 						var is_selected := copy_uid == selected_weapon_uid
-						copy_button.text = ("✓ 장착 중  ·  " if is_selected else "장착  ·  ") + "%s  +%d" % [RARITY_NAMES[clampi(int(copy.get("rarity", 0)), 0, 4)], int(copy.get("enhancement", 0))]
+						copy_button.text = ("✓ 장착 중  ·  " if is_selected else "장착  ·  ") + "%s  +%d" % [GAME_DATA.RARITY_NAMES[clampi(int(copy.get("rarity", 0)), 0, 4)], int(copy.get("enhancement", 0))]
 						copy_button.custom_minimum_size.y = 26.0
 						copy_button.pressed.connect(_equip_weapon_uid.bind(copy_uid))
 						card_body.add_child(copy_button)
@@ -773,7 +834,7 @@ func _build_lobby_section() -> Control:
 			resource_title.add_theme_font_size_override("font_size", 16)
 			resource_info.add_child(resource_title)
 			var resource_hint := Label.new()
-			resource_hint.text = "뽑기 1회에 조각 %d개가 필요합니다" % GACHA_COST
+			resource_hint.text = "뽑기 1회에 조각 %d개가 필요합니다" % GAME_DATA.GACHA_COST
 			resource_hint.add_theme_color_override("font_color", Color("786f61"))
 			resource_info.add_child(resource_hint)
 			var resource_count := Label.new()
@@ -788,7 +849,7 @@ func _build_lobby_section() -> Control:
 			chance_row.add_theme_constant_override("separation", 8)
 			chest_layout.add_child(chance_row)
 			var rarity_colors: Array[Color] = [Color("82796b"), Color("67916f"), Color("5485a5"), Color("936bb0"), Color("c49645")]
-			for index in RARITY_NAMES.size():
+			for index in GAME_DATA.RARITY_NAMES.size():
 				var chance_card := _lobby_card(chance_row, Color("f7efdf"), rarity_colors[index])
 				chance_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				chance_card.custom_minimum_size.y = 50.0
@@ -796,12 +857,12 @@ func _build_lobby_section() -> Control:
 				chance_info.alignment = BoxContainer.ALIGNMENT_CENTER
 				chance_card.add_child(chance_info)
 				var rarity_label := Label.new()
-				rarity_label.text = RARITY_NAMES[index]
+				rarity_label.text = GAME_DATA.RARITY_NAMES[index]
 				rarity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 				rarity_label.add_theme_color_override("font_color", rarity_colors[index])
 				chance_info.add_child(rarity_label)
 				var chance_label := Label.new()
-				chance_label.text = "%d%%" % RARITY_CHANCES[index]
+				chance_label.text = "%d%%" % GAME_DATA.RARITY_CHANCES[index]
 				chance_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 				chance_info.add_child(chance_label)
 			var showcase_card := _lobby_card(chest_layout, Color("e4d8c2"), Color("c7b58d"))
@@ -816,7 +877,7 @@ func _build_lobby_section() -> Control:
 			if not last_weapon_draw.is_empty():
 				var preview_weapon_id := str(last_weapon_draw.get("weapon_id", "pencil_sword"))
 				preview_icon.texture = _item_icon(_weapon_icon_index(preview_weapon_id))
-				preview_name = "%s · %s 등급" % [_weapon_name(preview_weapon_id), RARITY_NAMES[int(last_weapon_draw.get("rarity", 0))]]
+				preview_name = "%s · %s 등급" % [_weapon_name(preview_weapon_id), GAME_DATA.RARITY_NAMES[int(last_weapon_draw.get("rarity", 0))]]
 				preview_note = "마지막으로 획득한 무기"
 			else:
 				preview_icon.texture = _item_icon(11)
@@ -836,26 +897,26 @@ func _build_lobby_section() -> Control:
 			preview_subtitle.add_theme_color_override("font_color", Color("786f61"))
 			preview_info.add_child(preview_subtitle)
 			var draw_button := Button.new()
-			draw_button.text = "무기 뽑기  ·  조각 %d개" % GACHA_COST
+			draw_button.text = "무기 뽑기  ·  조각 %d개" % GAME_DATA.GACHA_COST
 			draw_button.icon = _item_icon(11)
 			draw_button.add_theme_constant_override("icon_max_width", 34)
 			draw_button.custom_minimum_size = Vector2(320.0, 46.0)
 			draw_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-			draw_button.disabled = weapon_shards < GACHA_COST
-			if weapon_shards < GACHA_COST:
-				draw_button.tooltip_text = "조각이 %d개 더 필요합니다" % (GACHA_COST - weapon_shards)
+			draw_button.disabled = weapon_shards < GAME_DATA.GACHA_COST
+			if weapon_shards < GAME_DATA.GACHA_COST:
+				draw_button.tooltip_text = "조각이 %d개 더 필요합니다" % (GAME_DATA.GACHA_COST - weapon_shards)
 			draw_button.pressed.connect(_draw_weapon)
 			body.add_child(draw_button)
 		"skills":
 			body.add_theme_constant_override("separation", 6)
 			var heading := Label.new()
-			heading.text = "보유 스킬 %d / %d  ·  마력 조각 %d" % [skills_owned.size(), SKILLS.size(), magic_shards]
+			heading.text = "보유 스킬 %d / %d  ·  마력 조각 %d" % [skills_owned.size(), GAME_DATA.SKILLS.size(), magic_shards]
 			body.add_child(heading)
 			var draw_skill := Button.new()
-			draw_skill.text = "스킬 뽑기  ·  마력 조각 %d개" % SKILL_GACHA_COST if skills_owned.size() < SKILLS.size() else "중복 뽑기 · 보유 스킬 강화  ·  마력 조각 %d개" % SKILL_GACHA_COST
+			draw_skill.text = "스킬 뽑기  ·  마력 조각 %d개" % GAME_DATA.SKILL_GACHA_COST if skills_owned.size() < GAME_DATA.SKILLS.size() else "중복 뽑기 · 보유 스킬 강화  ·  마력 조각 %d개" % GAME_DATA.SKILL_GACHA_COST
 			draw_skill.icon = _skill_icon("magic_shard")
 			draw_skill.add_theme_constant_override("icon_max_width", 30)
-			draw_skill.disabled = magic_shards < SKILL_GACHA_COST or not _can_draw_skill()
+			draw_skill.disabled = magic_shards < GAME_DATA.SKILL_GACHA_COST or not _can_draw_skill()
 			draw_skill.pressed.connect(_draw_skill)
 			draw_skill.custom_minimum_size = Vector2(330.0, 44.0)
 			draw_skill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -894,7 +955,7 @@ func _build_lobby_section() -> Control:
 			skill_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			skill_list.add_theme_constant_override("separation", 4)
 			scroll.add_child(skill_list)
-			for skill in SKILLS:
+			for skill in GAME_DATA.SKILLS:
 				var skill_id := str(skill.id)
 				var is_owned := skills_owned.has(skill_id)
 				var is_passive := bool(skill.get("passive", false))
@@ -931,7 +992,7 @@ func _build_lobby_section() -> Control:
 				if is_passive:
 					equip_button.text = "패시브"
 				elif not is_owned:
-					equip_button.text = "미수집"
+					equip_button.text = "정보 보기"
 				elif assigned_slot == selected_skill_slot:
 					equip_button.text = "장착됨"
 				elif assigned_slot >= 0:
@@ -939,8 +1000,10 @@ func _build_lobby_section() -> Control:
 				else:
 					equip_button.text = "교체" if selected_skill_slot >= 0 and not equipped_skill_slots[selected_skill_slot].is_empty() else "장착"
 				equip_button.custom_minimum_size = Vector2(76.0, 34.0)
-				equip_button.disabled = is_passive or not is_owned or selected_skill_slot < 0 or assigned_slot == selected_skill_slot
-				if is_owned and not is_passive and selected_skill_slot >= 0:
+				equip_button.disabled = is_passive or (is_owned and (selected_skill_slot < 0 or assigned_slot == selected_skill_slot))
+				if not is_owned:
+					equip_button.pressed.connect(_show_unowned_skill_info.bind(skill))
+				elif not is_passive and selected_skill_slot >= 0:
 					equip_button.pressed.connect(_equip_skill_to_slot.bind(skill_id, selected_skill_slot))
 				row.add_child(equip_button)
 				if is_owned:
@@ -948,7 +1011,7 @@ func _build_lobby_section() -> Control:
 					var upgrade_cost := _skill_upgrade_cost(skill_level)
 					upgrade_button.text = "강화 %d" % upgrade_cost
 					upgrade_button.custom_minimum_size = Vector2(72, 34)
-					upgrade_button.disabled = skill_level >= MAX_ENHANCEMENT or magic_shards < upgrade_cost
+					upgrade_button.disabled = skill_level >= GAME_DATA.MAX_ENHANCEMENT or magic_shards < upgrade_cost
 					upgrade_button.pressed.connect(_upgrade_skill.bind(skill_id))
 					row.add_child(upgrade_button)
 		"settings":
@@ -1053,8 +1116,8 @@ func _build_lobby_section() -> Control:
 
 
 func _weapon_icon_index(weapon_id: String) -> int:
-	for index in WEAPONS.size():
-		if str(WEAPONS[index].id) == weapon_id:
+	for index in GAME_DATA.WEAPONS.size():
+		if str(GAME_DATA.WEAPONS[index].id) == weapon_id:
 			return index
 	return 0
 
@@ -1067,13 +1130,13 @@ func _item_icon(index: int) -> AtlasTexture:
 
 
 func _skill_icon(skill_id: String) -> AtlasTexture:
-	if skill_id == DASH_SKILL_ID:
+	if skill_id == GAME_DATA.DASH_SKILL_ID:
 		var dash_icon := AtlasTexture.new()
 		dash_icon.atlas = ACTION_ATLAS
 		dash_icon.region = Rect2(0.0, ACTION_FRAME_SIZE.y * 3.0, ACTION_FRAME_SIZE.x, ACTION_FRAME_SIZE.y)
 		return dash_icon
 	var icon_index := 4
-	for skill in SKILLS:
+	for skill in GAME_DATA.SKILLS:
 		if str(skill.id) == skill_id:
 			icon_index = int(skill.icon)
 			break
@@ -1084,14 +1147,14 @@ func _skill_icon(skill_id: String) -> AtlasTexture:
 
 
 func _skill_name(skill_id: String) -> String:
-	for skill in SKILLS:
+	for skill in GAME_DATA.SKILLS:
 		if str(skill.id) == skill_id:
 			return str(skill.name)
 	return "미장착"
 
 
 func _skill_data(skill_id: String) -> Dictionary:
-	for skill in SKILLS:
+	for skill in GAME_DATA.SKILLS:
 		if str(skill.id) == skill_id:
 			return skill
 	return {}
@@ -1106,10 +1169,10 @@ func _skill_strength(skill_id: String) -> float:
 
 
 func _can_draw_skill() -> bool:
-	if skills_owned.size() < SKILLS.size():
+	if skills_owned.size() < GAME_DATA.SKILLS.size():
 		return true
 	for skill_id in skills_owned:
-		if int(skill_levels.get(skill_id, 1)) < MAX_ENHANCEMENT:
+		if int(skill_levels.get(skill_id, 1)) < GAME_DATA.MAX_ENHANCEMENT:
 			return true
 	return false
 
@@ -1118,22 +1181,23 @@ func _skill_description(skill: Dictionary, level: int) -> String:
 	var skill_id := str(skill.get("id", ""))
 	var strength := 1.0 + float(maxi(0, level - 1)) * 0.15
 	var cooldown := maxf(5.0, float(skill.get("cooldown", 10.0)) * (1.0 - float(level - 1) * 0.025))
+	var cast_time := float(skill.get("cast_time", 0.0))
 	if bool(skill.get("passive", false)):
 		var dash_ratio := float(skill.get("damage_ratio", 1.0)) * strength
 		var dash_damage := _weapon_attack_power(_equipped_item()) * dash_ratio
-		return "패시브 · Space 대시 경로의 적 전체 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.1f초" % [dash_ratio * 100.0, dash_damage, DASH_COOLDOWN_DURATION]
+		return "패시브 · Space 대시 경로의 적 전체 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.1f초" % [dash_ratio * 100.0, dash_damage, GAME_DATA.DASH_COOLDOWN_DURATION]
 	match skill_id:
-		"ink_wave": return "반경 %d 안 적 전체 · 공격력 %.0f%% / %.1f 피해/대상 · 쿨다운 %.0f초" % [int(skill.radius), float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cooldown]
-		"compass_pierce": return "가장 가까운 적 1명 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.0f초" % [float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cooldown]
-		"lifeline": return "최대 체력 %.0f%% 회복 · 쿨다운 %.0f초" % [minf(0.75, float(skill.heal_ratio) * strength) * 100.0, cooldown]
-		"final_ink": return "1초 집중 후 적 1명 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.0f초" % [float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cooldown]
+		"ink_wave": return "반경 %d 안 적 전체 · 공격력 %.0f%% / %.1f 피해/대상 · 시전 %.1f초 · 쿨다운 %.0f초" % [int(skill.radius), float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cast_time, cooldown]
+		"compass_pierce": return "가장 가까운 적 1명 · 공격력 %.0f%% / %.1f 피해 · 시전 %.1f초 · 쿨다운 %.0f초" % [float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cast_time, cooldown]
+		"lifeline": return "최대 체력 %.0f%% 회복 · 시전 %.1f초 · 쿨다운 %.0f초" % [minf(0.75, float(skill.heal_ratio) * strength) * 100.0, cast_time, cooldown]
+		"final_ink": return "%.1f초 집중 후 적 1명 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.0f초" % [cast_time, float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cooldown]
 	return str(skill.get("description", ""))
 
 
 func _upgrade_skill(skill_id: String) -> void:
 	var level := int(skill_levels.get(skill_id, 1))
 	var cost := _skill_upgrade_cost(level)
-	if not skills_owned.has(skill_id) or level >= MAX_ENHANCEMENT or magic_shards < cost:
+	if not skills_owned.has(skill_id) or level >= GAME_DATA.MAX_ENHANCEMENT or magic_shards < cost:
 		return
 	magic_shards -= cost
 	skill_levels[skill_id] = level + 1
@@ -1143,7 +1207,7 @@ func _upgrade_skill(skill_id: String) -> void:
 
 
 func _use_skill(slot_index: int) -> void:
-	if slot_index < 0 or slot_index >= equipped_skill_slots.size():
+	if not skill_cast_id.is_empty() or slot_index < 0 or slot_index >= equipped_skill_slots.size():
 		return
 	var skill_id := equipped_skill_slots[slot_index]
 	if skill_id.is_empty() or not skills_owned.has(skill_id) or float(skill_cooldowns.get(skill_id, 0.0)) > 0.0:
@@ -1154,7 +1218,28 @@ func _use_skill(slot_index: int) -> void:
 	var level := int(skill_levels.get(skill_id, 1))
 	var strength := _skill_strength(skill_id)
 	var cooldown := maxf(5.0, float(skill.cooldown) * (1.0 - float(level - 1) * 0.025))
+	var target: Dictionary = {}
+	if skill_id == "compass_pierce" or skill_id == "final_ink":
+		target = _nearest_target(1000.0)
+		if target.is_empty():
+			last_lobby_message = "사거리 안에 공격할 적이 없습니다."
+			return
 	skill_cooldowns[skill_id] = cooldown
+	skill_cast_id = skill_id
+	skill_cast_duration = float(skill.get("cast_time", 0.0))
+	skill_cast_timer = skill_cast_duration
+	skill_cast_target = target.get("position", player_position)
+	skill_cast_target_ref = target
+	if skill_cast_duration > 0.0:
+		await get_tree().create_timer(skill_cast_duration, false).timeout
+	if mode != "playing":
+		skill_cast_id = ""
+		skill_cast_timer = 0.0
+		skill_cast_target_ref = {}
+		return
+	skill_cast_id = ""
+	skill_cast_timer = 0.0
+	skill_cast_target_ref = {}
 	match skill_id:
 		"ink_wave":
 			for enemy in enemies.duplicate():
@@ -1164,14 +1249,6 @@ func _use_skill(slot_index: int) -> void:
 				_damage_boss(player_damage * float(skill.damage_ratio) * strength)
 			_burst(player_position, Color("6bd2ca"), 28)
 		"compass_pierce", "final_ink":
-			var target := _nearest_target(1000.0)
-			if target.is_empty():
-				skill_cooldowns[skill_id] = 0.0
-				last_lobby_message = "사거리 안에 공격할 적이 없습니다."
-				return
-			if skill_id == "final_ink":
-				await get_tree().create_timer(float(skill.get("charge_time", 1.0))).timeout
-				if mode != "playing": return
 			_damage_target(target, player_damage * float(skill.damage_ratio) * strength)
 			_burst(target.position, Color("e3b761") if skill_id == "final_ink" else Color("c3a66d"), 20)
 		"lifeline":
@@ -1238,7 +1315,7 @@ func _equip_weapon_uid(uid: int) -> void:
 		if int(item.get("uid", -1)) == uid:
 			selected_weapon_uid = uid
 			selected_weapon = str(item.get("weapon_id", "pencil_sword"))
-			last_lobby_message = "%s %s 무기를 장착했습니다." % [RARITY_NAMES[int(item.get("rarity", 0))], _weapon_name(selected_weapon)]
+			last_lobby_message = "%s %s 무기를 장착했습니다." % [GAME_DATA.RARITY_NAMES[int(item.get("rarity", 0))], _weapon_name(selected_weapon)]
 			_save_progress()
 			_refresh_lobby_window()
 			return
@@ -1254,6 +1331,11 @@ func _enhancement_cost(item: Dictionary) -> int:
 	var level_value := int(item.get("enhancement", 0))
 	var rarity := int(item.get("rarity", 0))
 	return 50 * (level_value + 1) * (level_value + 1) * (rarity + 1)
+
+
+func _enhancement_success_chance(level: int) -> float:
+	var chance_index := clampi(level, 0, GAME_DATA.ENHANCEMENT_SUCCESS_CHANCES.size() - 1)
+	return float(GAME_DATA.ENHANCEMENT_SUCCESS_CHANCES[chance_index])
 
 
 func _potential_reset_cost(item: Dictionary) -> int:
@@ -1275,18 +1357,16 @@ func _potential_lines(item: Dictionary) -> Array[String]:
 
 
 func _potential_name(id: String) -> String:
-	for potential in POTENTIALS:
+	for potential in GAME_DATA.POTENTIALS:
 		if str(potential.id) == id:
 			return str(potential.name)
 	return id
 
 
 func _roll_potentials() -> Array[Dictionary]:
-	var pool: Array = POTENTIALS.duplicate(true)
-	pool.shuffle()
 	var result: Array[Dictionary] = []
 	for index in 3:
-		var option: Dictionary = pool[index]
+		var option: Dictionary = GAME_DATA.POTENTIALS[rng.randi_range(0, GAME_DATA.POTENTIALS.size() - 1)]
 		result.append({"id":str(option.id), "value":rng.randi_range(int(option.min), int(option.max))})
 	return result
 
@@ -1316,45 +1396,45 @@ func _make_weapon_record(weapon_id: String, rarity: int, enhancement: int = 0) -
 
 
 func _draw_weapon() -> void:
-	if weapon_shards < GACHA_COST:
+	if weapon_shards < GAME_DATA.GACHA_COST:
 		last_lobby_message = "무기 조각이 부족합니다. 적 처치나 보스 첫 클리어로 모으세요."
 		_update_lobby()
 		return
-	weapon_shards -= GACHA_COST
+	weapon_shards -= GAME_DATA.GACHA_COST
 	var roll := rng.randi_range(1, 100)
 	var rarity := 0
 	var boundary := 0
-	for index in RARITY_CHANCES.size():
-		boundary += int(RARITY_CHANCES[index])
+	for index in GAME_DATA.RARITY_CHANCES.size():
+		boundary += int(GAME_DATA.RARITY_CHANCES[index])
 		if roll <= boundary:
 			rarity = index
 			break
-	var weapon_id: String = str(WEAPONS[rng.randi_range(0, WEAPONS.size() - 1)].id)
+	var weapon_id: String = str(GAME_DATA.WEAPONS[rng.randi_range(0, GAME_DATA.WEAPONS.size() - 1)].id)
 	var obtained := _make_weapon_record(weapon_id, rarity)
 	last_weapon_draw = obtained.duplicate(true)
 	weapon_inventory.append(obtained)
 	selected_weapon_uid = int(obtained.uid)
 	selected_weapon = weapon_id
-	last_lobby_message = "%s 등급 무기 획득: %s" % [RARITY_NAMES[rarity], _weapon_name(weapon_id)]
+	last_lobby_message = "%s 등급 무기 획득: %s" % [GAME_DATA.RARITY_NAMES[rarity], _weapon_name(weapon_id)]
 	_save_progress()
 	var previews: Array[Dictionary] = []
-	for weapon in WEAPONS:
-		var preview_rarity := rng.randi_range(0, RARITY_NAMES.size() - 1)
-		previews.append({"icon":_item_icon(_weapon_icon_index(str(weapon.id))), "label":"%s · %s" % [RARITY_NAMES[preview_rarity], weapon.name]})
+	for weapon in GAME_DATA.WEAPONS:
+		var preview_rarity := rng.randi_range(0, GAME_DATA.RARITY_NAMES.size() - 1)
+		previews.append({"icon":_item_icon(_weapon_icon_index(str(weapon.id))), "label":"%s · %s" % [GAME_DATA.RARITY_NAMES[preview_rarity], weapon.name]})
 	var accent: Color = [Color("928673"), Color("62a68a"), Color("4e88c6"), Color("a46bd1"), Color("e2a73e")][rarity]
-	await reward_presentation.reveal_gacha(previews, _item_icon(_weapon_icon_index(weapon_id)), "%s 등급 · %s" % [RARITY_NAMES[rarity], _weapon_name(weapon_id)], "", accent)
+	await reward_presentation.reveal_gacha(previews, _item_icon(_weapon_icon_index(weapon_id)), "%s 등급 · %s" % [GAME_DATA.RARITY_NAMES[rarity], _weapon_name(weapon_id)], "", accent)
 
 
 func _draw_skill() -> void:
-	if magic_shards < SKILL_GACHA_COST:
+	if magic_shards < GAME_DATA.SKILL_GACHA_COST:
 		return
 	var unowned: Array[Dictionary] = []
-	for skill in SKILLS:
+	for skill in GAME_DATA.SKILLS:
 		if not skills_owned.has(str(skill.id)):
 			unowned.append(skill)
 	var result: Dictionary
 	var obtained_new_skill := not unowned.is_empty()
-	magic_shards -= SKILL_GACHA_COST
+	magic_shards -= GAME_DATA.SKILL_GACHA_COST
 	if not unowned.is_empty():
 		result = unowned[rng.randi_range(0, unowned.size() - 1)]
 		skills_owned.append(str(result.id))
@@ -1362,10 +1442,10 @@ func _draw_skill() -> void:
 	else:
 		var upgradeable: Array[String] = []
 		for skill_id in skills_owned:
-			if int(skill_levels.get(skill_id, 1)) < MAX_ENHANCEMENT:
+			if int(skill_levels.get(skill_id, 1)) < GAME_DATA.MAX_ENHANCEMENT:
 				upgradeable.append(skill_id)
 		if upgradeable.is_empty():
-			magic_shards += SKILL_GACHA_COST
+			magic_shards += GAME_DATA.SKILL_GACHA_COST
 			return
 		var owned_skill_id := upgradeable[rng.randi_range(0, upgradeable.size() - 1)]
 		result = _skill_data(owned_skill_id)
@@ -1374,7 +1454,7 @@ func _draw_skill() -> void:
 	last_lobby_message = "새 스킬 획득: %s" % result.name if obtained_new_skill else "%s 스킬이 Lv.%d로 강화됐습니다." % [result.name, result_level]
 	_save_progress()
 	var previews: Array[Dictionary] = []
-	for skill in SKILLS:
+	for skill in GAME_DATA.SKILLS:
 		if not skills_owned.has(str(skill.id)) or str(skill.id) == str(result.id):
 			previews.append({"icon":_skill_icon(str(skill.id)), "label":str(skill.name)})
 	await reward_presentation.reveal_gacha(previews, _skill_icon(str(result.id)), str(result.name), _skill_description(result, result_level), Color("63b8a0"))
@@ -1386,7 +1466,8 @@ func _enhance_equipped_weapon() -> void:
 		return
 	var weapon_uid := int(weapon_inventory[index].get("uid", -1))
 	var item: Dictionary = weapon_inventory[index]
-	reward_presentation.open_enhancement_window(_item_icon(_weapon_icon_index(selected_weapon)), _weapon_name(selected_weapon), int(item.get("enhancement", 0)), _enhancement_cost(item), gold)
+	var initial_level := int(item.get("enhancement", 0))
+	reward_presentation.open_enhancement_window(_item_icon(_weapon_icon_index(selected_weapon)), _weapon_name(selected_weapon), initial_level, _enhancement_cost(item), gold, _weapon_attack_power(item), _enhancement_success_chance(initial_level))
 	var action: String = await reward_presentation.weapon_window_action
 	while action != "close":
 		if action == "enhance":
@@ -1395,25 +1476,32 @@ func _enhance_equipped_weapon() -> void:
 				item = weapon_inventory[index]
 				var old_level := int(item.get("enhancement", 0))
 				var cost := _enhancement_cost(item)
-				if old_level < MAX_ENHANCEMENT and gold >= cost:
-					await reward_presentation.animate_enhancement_attempt(old_level, old_level + 1)
+				var success_chance := _enhancement_success_chance(old_level)
+				if old_level < GAME_DATA.MAX_ENHANCEMENT and gold >= cost:
+					var succeeded := rng.randf_range(0.0, 100.0) < success_chance
+					await reward_presentation.animate_enhancement_attempt(old_level, old_level + 1, succeeded)
 					index = _weapon_inventory_index(weapon_uid)
-					if index >= 0 and gold >= cost:
+					if index >= 0 and gold >= cost and int(weapon_inventory[index].get("enhancement", 0)) == old_level:
 						item = weapon_inventory[index]
 						gold -= cost
-						item.enhancement = old_level + 1
+						if succeeded:
+							item.enhancement = old_level + 1
+							last_lobby_message = "%s 무기 +%d 강화 성공" % [_weapon_name(str(item.get("weapon_id", selected_weapon))), old_level + 1]
+						else:
+							last_lobby_message = "%s 무기 강화 실패 · +%d 유지" % [_weapon_name(str(item.get("weapon_id", selected_weapon))), old_level]
 						weapon_inventory[index] = item
-						last_lobby_message = "%s 무기 +%d 강화 성공" % [_weapon_name(str(item.get("weapon_id", selected_weapon))), old_level + 1]
 						_save_progress()
 						_refresh_lobby_window()
-						item = weapon_inventory[_weapon_inventory_index(weapon_uid)]
-					reward_presentation.update_enhancement_window(int(item.get("enhancement", 0)), _enhancement_cost(item), gold)
+						index = _weapon_inventory_index(weapon_uid)
+						if index >= 0:
+							item = weapon_inventory[index]
+							reward_presentation.update_enhancement_window(int(item.get("enhancement", 0)), _enhancement_cost(item), gold, _weapon_attack_power(item), _enhancement_success_chance(int(item.get("enhancement", 0))))
 		index = _weapon_inventory_index(weapon_uid)
 		if index < 0:
 			break
 		item = weapon_inventory[index]
 		var current_level := int(item.get("enhancement", 0))
-		reward_presentation.update_enhancement_window(current_level, _enhancement_cost(item), gold)
+		reward_presentation.update_enhancement_window(current_level, _enhancement_cost(item), gold, _weapon_attack_power(item), _enhancement_success_chance(current_level))
 		action = await reward_presentation.weapon_window_action
 
 
@@ -1482,7 +1570,7 @@ func _synthesize_equipped_weapon() -> void:
 	weapon_inventory.append(result)
 	selected_weapon_uid = int(result.uid)
 	selected_weapon = weapon_id
-	last_lobby_message = "%s 무기 2개를 합성해 %s 등급 %s를 만들었습니다." % [RARITY_NAMES[rarity], RARITY_NAMES[rarity + 1], _weapon_name(weapon_id)]
+	last_lobby_message = "%s 무기 2개를 합성해 %s 등급 %s를 만들었습니다." % [GAME_DATA.RARITY_NAMES[rarity], GAME_DATA.RARITY_NAMES[rarity + 1], _weapon_name(weapon_id)]
 	_save_progress()
 	_update_lobby()
 
@@ -1493,15 +1581,15 @@ func _confirm_synthesize_equipped_weapon() -> void:
 	var equipped := _equipped_item()
 	var rarity := int(equipped.get("rarity", 0))
 	var cost := rarity + 1
-	if rarity >= RARITY_NAMES.size() - 1 or weapon_shards < cost:
+	if rarity >= GAME_DATA.RARITY_NAMES.size() - 1 or weapon_shards < cost:
 		return
 	var weapon_name := _weapon_name(str(equipped.get("weapon_id", selected_weapon)))
-	var confirmed: bool = await reward_presentation.confirm_weapon_synthesis(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, RARITY_NAMES[rarity + 1], cost)
+	var confirmed: bool = await reward_presentation.confirm_weapon_synthesis(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, GAME_DATA.RARITY_NAMES[rarity + 1], cost)
 	if not confirmed:
 		return
 	_synthesize_equipped_weapon()
 	var result := _equipped_item()
-	await reward_presentation.play_synthesis_result(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, RARITY_NAMES[int(result.get("rarity", rarity + 1))])
+	await reward_presentation.play_synthesis_result(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, GAME_DATA.RARITY_NAMES[int(result.get("rarity", rarity + 1))])
 
 
 func _remove_weapon_uid(uid: int) -> void:
@@ -1512,7 +1600,7 @@ func _remove_weapon_uid(uid: int) -> void:
 
 
 func _weapon_name(weapon_id: String) -> String:
-	for weapon in WEAPONS:
+	for weapon in GAME_DATA.WEAPONS:
 		if weapon.id == weapon_id:
 			return weapon.name
 	return "연필검"
@@ -1524,16 +1612,21 @@ func start_run() -> void:
 	skill_hud.visible = true
 	get_tree().paused = false
 	overlay.hide()
-	last_lobby_message = "%s에 출전했습니다." % STAGE_IDS[stage_index]
+	last_lobby_message = "%s에 출전했습니다." % GAME_DATA.STAGE_IDS[stage_index]
 	_update_hud()
 
 
 func _reset_run() -> void:
 	elapsed = 0.0
 	skill_cooldowns.clear()
+	skill_cast_id = ""
+	skill_cast_timer = 0.0
+	skill_cast_duration = 0.0
+	skill_cast_target_ref = {}
+	attack_indicator_timer = 0.0
 	kills = 0
 	spawn_timer = 0.0
-	stage_enemy_quota = int(STAGE_ENEMY_COUNTS[STAGE_IDS[stage_index]])
+	stage_enemy_quota = int(GAME_DATA.STAGE_ENEMY_COUNTS[GAME_DATA.STAGE_IDS[stage_index]])
 	stage_enemies_spawned = 0
 	stage_boss_spawned = false
 	attack_timer = 0.0
@@ -1545,12 +1638,11 @@ func _reset_run() -> void:
 	player_anim_time = 0.0
 	player_position = Vector2(W / 2.0, H / 2.0)
 	var item := _equipped_item()
-	var speed_bonus := _potential_total(item, "attack_speed")
-	player_max_hp = 100.0 * (1.0 + _potential_total(item, "max_health") / 100.0)
+	player_max_hp = _player_max_health_for_item(item)
 	player_hp = player_max_hp
-	player_speed = 190.0 * (1.0 + _potential_total(item, "move_speed") / 100.0)
+	player_speed = _player_move_speed_for_item(item)
 	player_damage = _weapon_attack_power(item)
-	attack_rate = 0.72 * 100.0 / (100.0 + speed_bonus)
+	attack_rate = _player_attack_interval_for_item(item)
 	facing = 1.0
 	enemies.clear()
 	drops.clear()
@@ -1566,21 +1658,21 @@ func _load_progress() -> void:
 	var skill_progress_changed := false
 	var saved_selected := "pencil_sword"
 	if has_save:
-		stage_index = clampi(int(saved_progress.get("stage_index", 0)), 0, STAGE_IDS.size() - 1)
-		furthest_stage_index = clampi(int(saved_progress.get("furthest_stage_index", 0)), 0, STAGE_IDS.size() - 1)
+		stage_index = clampi(int(saved_progress.get("stage_index", 0)), 0, GAME_DATA.STAGE_IDS.size() - 1)
+		furthest_stage_index = clampi(int(saved_progress.get("furthest_stage_index", 0)), 0, GAME_DATA.STAGE_IDS.size() - 1)
 		gold = maxi(0, int(saved_progress.get("gold", saved_progress.get("ink_shards", 0))))
 		weapon_shards = maxi(0, int(saved_progress.get("weapon_shards", 0)))
 		magic_shards = maxi(0, int(saved_progress.get("magic_shards", 0)))
 		var stored_skills: Variant = saved_progress.get("skills_owned", [])
 		if stored_skills is Array:
 			for skill_id in stored_skills:
-				for skill in SKILLS:
+				for skill in GAME_DATA.SKILLS:
 					if str(skill.id) == str(skill_id) and not skills_owned.has(str(skill_id)):
 						skills_owned.append(str(skill_id))
 		var stored_skill_levels: Variant = saved_progress.get("skill_levels", {})
 		if stored_skill_levels is Dictionary:
 			for skill_id in skills_owned:
-				skill_levels[skill_id] = clampi(int(stored_skill_levels.get(skill_id, 1)), 1, MAX_ENHANCEMENT)
+				skill_levels[skill_id] = clampi(int(stored_skill_levels.get(skill_id, 1)), 1, GAME_DATA.MAX_ENHANCEMENT)
 		else:
 			for skill_id in skills_owned:
 				skill_levels[skill_id] = 1
@@ -1594,11 +1686,11 @@ func _load_progress() -> void:
 		var stored_inventory: Variant = saved_progress.get("weapon_inventory", [])
 		if stored_inventory is Array:
 			for raw_item in stored_inventory:
-				if raw_item is Dictionary and WEAPONS.any(func(weapon): return str(weapon.id) == str(raw_item.get("weapon_id", ""))):
+				if raw_item is Dictionary and GAME_DATA.WEAPONS.any(func(weapon): return str(weapon.id) == str(raw_item.get("weapon_id", ""))):
 					var item: Dictionary = raw_item.duplicate(true)
 					item["uid"] = int(item.get("uid", next_weapon_uid))
 					item["rarity"] = clampi(int(item.get("rarity", 0)), 0, 4)
-					item["enhancement"] = clampi(int(item.get("enhancement", 0)), 0, MAX_ENHANCEMENT)
+					item["enhancement"] = clampi(int(item.get("enhancement", 0)), 0, GAME_DATA.MAX_ENHANCEMENT)
 					var saved_potentials: Variant = item.get("potentials", [])
 					if not (saved_potentials is Array) or saved_potentials.size() != 3:
 						item["potentials"] = _roll_potentials()
@@ -1608,12 +1700,12 @@ func _load_progress() -> void:
 			var legacy_weapons: Variant = saved_progress.get("unlocked_weapons", ["pencil_sword"])
 			if legacy_weapons is Array:
 				for weapon_id in legacy_weapons:
-					if WEAPONS.any(func(weapon): return str(weapon.id) == str(weapon_id)):
+					if GAME_DATA.WEAPONS.any(func(weapon): return str(weapon.id) == str(weapon_id)):
 						weapon_inventory.append(_make_weapon_record(str(weapon_id), 0))
 		var saved_clears: Variant = saved_progress.get("cleared_stages", [])
 		if saved_clears is Array:
 			for stage_id in saved_clears:
-				if STAGE_IDS.has(str(stage_id)) and not cleared_stages.has(str(stage_id)):
+				if GAME_DATA.STAGE_IDS.has(str(stage_id)) and not cleared_stages.has(str(stage_id)):
 					cleared_stages.append(str(stage_id))
 	if weapon_inventory.is_empty():
 		weapon_inventory.append(_make_weapon_record("pencil_sword", 0))
@@ -1628,12 +1720,12 @@ func _load_progress() -> void:
 		selected_index = 0
 	selected_weapon_uid = int(weapon_inventory[selected_index].uid)
 	selected_weapon = str(weapon_inventory[selected_index].get("weapon_id", "pencil_sword"))
-	if not skills_owned.has(DASH_SKILL_ID):
-		skills_owned.append(DASH_SKILL_ID)
-		skill_levels[DASH_SKILL_ID] = 1
+	if not skills_owned.has(GAME_DATA.DASH_SKILL_ID):
+		skills_owned.append(GAME_DATA.DASH_SKILL_ID)
+		skill_levels[GAME_DATA.DASH_SKILL_ID] = 1
 		skill_progress_changed = true
-	elif not skill_levels.has(DASH_SKILL_ID):
-		skill_levels[DASH_SKILL_ID] = 1
+	elif not skill_levels.has(GAME_DATA.DASH_SKILL_ID):
+		skill_levels[GAME_DATA.DASH_SKILL_ID] = 1
 		skill_progress_changed = true
 	if skill_progress_changed:
 		_save_progress()
@@ -1681,6 +1773,14 @@ func show_pause() -> void:
 func _update_game(delta: float) -> void:
 	elapsed += delta
 	attack_timer -= delta
+	attack_indicator_timer = maxf(0.0, attack_indicator_timer - delta)
+	skill_cast_timer = maxf(0.0, skill_cast_timer - delta)
+	if not skill_cast_target_ref.is_empty():
+		if bool(skill_cast_target_ref.get("is_boss", false)):
+			if not boss.is_empty():
+				skill_cast_target = boss.position
+		else:
+			skill_cast_target = skill_cast_target_ref.get("position", skill_cast_target)
 	for skill_id in skill_cooldowns.keys():
 		skill_cooldowns[skill_id] = maxf(0.0, float(skill_cooldowns[skill_id]) - delta)
 	dash_timer = maxf(0.0, dash_timer - delta)
@@ -1710,7 +1810,7 @@ func _update_game(delta: float) -> void:
 
 
 func _spawn_enemies(delta: float) -> void:
-	var stage_id: String = STAGE_IDS[stage_index]
+	var stage_id: String = GAME_DATA.STAGE_IDS[stage_index]
 	if stage_enemies_spawned < stage_enemy_quota:
 		spawn_timer -= delta
 		if spawn_timer <= 0.0:
@@ -1738,11 +1838,11 @@ func _spawn_enemies(delta: float) -> void:
 			stage_enemies_spawned += 1
 			spawn_timer = 0.82
 		return
-	if BOSS_STAGES.has(stage_id) and not stage_boss_spawned and enemies.is_empty():
+	if GAME_DATA.BOSS_STAGES.has(stage_id) and not stage_boss_spawned and enemies.is_empty():
 		stage_boss_spawned = true
-		boss = {"position":Vector2(W/2.0, 90.0), "hp":1200.0, "max_hp":1200.0, "radius":35.0, "attack":2.2, "warning":0.0, "phase":0, "aim_y":0.0}
+		boss = {"position":Vector2(W/2.0, 90.0), "hp":1450.0, "max_hp":1450.0, "radius":35.0, "attack":1.9, "warning":0.0, "phase":0, "aim_y":0.0}
 		boss_bar.show()
-	elif not BOSS_STAGES.has(stage_id) and enemies.is_empty():
+	elif not GAME_DATA.BOSS_STAGES.has(stage_id) and enemies.is_empty():
 		finish(true)
 
 
@@ -1765,12 +1865,14 @@ func _spawn_enemy(kind: String) -> void:
 	var position := player_position + Vector2(cos(angle), sin(angle)) * distance
 	position.x = clampf(position.x, 22.0, W - 22.0)
 	position.y = clampf(position.y, 22.0, H - 22.0)
-	var data: Dictionary = ENEMY_DATA[kind].duplicate(true)
-	var scale := 1.0 + float(stage_index) * 0.08
+	var data: Dictionary = GAME_DATA.ENEMY_DATA[kind].duplicate(true)
+	var health_scale := 1.0 + float(stage_index) * 0.14
 	data["kind"] = kind
 	data["position"] = position
-	data["hp"] *= scale
+	data["hp"] *= health_scale
 	data["max_hp"] = data["hp"]
+	data["speed"] *= 1.0 + float(stage_index) * 0.025
+	data["damage"] *= 1.0 + float(stage_index) * 0.08
 	data["attack"] = rng.randf_range(1.0, 2.0)
 	data["windup"] = 0.0
 	data["charge"] = 0.0
@@ -1793,11 +1895,11 @@ func _update_enemies(delta: float) -> void:
 			elif enemy.windup > 0.0:
 				enemy.windup -= delta
 				if enemy.windup <= 0.0:
-					enemy.velocity = to_player.normalized() * 250.0
+					enemy.velocity = to_player.normalized() * 310.0
 					enemy.charge = 0.45
 			elif distance < 260.0 and enemy.attack <= 0.0:
-				enemy.windup = 0.62
-				enemy.attack = 2.6
+				enemy.windup = 0.5
+				enemy.attack = 2.2
 			else:
 				position += to_player.normalized() * float(enemy.speed) * 0.72 * delta
 		elif enemy.kind == "thrower":
@@ -1806,13 +1908,13 @@ func _update_enemies(delta: float) -> void:
 			elif distance < 175.0:
 				position -= to_player.normalized() * float(enemy.speed) * delta
 			if enemy.attack <= 0.0 and distance < 360.0:
-				projectiles.append({"team":"enemy", "kind":"enemy_orb", "position":position, "velocity":to_player.normalized()*145.0, "life":3.0, "damage":enemy.damage})
-				enemy.attack = 2.2
+				projectiles.append({"team":"enemy", "kind":"enemy_orb", "position":position, "velocity":to_player.normalized()*185.0, "life":3.0, "damage":enemy.damage})
+				enemy.attack = 1.8
 		else:
 			position += to_player.normalized() * float(enemy.speed) * delta
 		enemy.position = position
 		if position.distance_to(player_position) < float(enemy.radius) + 13.0:
-			_hurt(float(enemy.damage) * delta * 2.2)
+			_hurt(float(enemy.damage) * 0.6)
 
 
 func _update_projectiles(delta: float) -> void:
@@ -1909,23 +2011,22 @@ func _damage_target(target: Dictionary, amount: float) -> void:
 
 func _auto_attack() -> void:
 	var damage := _effective_damage()
-	var damage_ratio := 1.0
-	for weapon in WEAPONS:
-		if str(weapon.id) == selected_weapon:
-			damage_ratio = float(weapon.get("damage_ratio", 1.0))
-			break
-	var target := _nearest_target(470.0)
+	var weapon := _weapon_profile(selected_weapon)
+	var damage_ratio := float(weapon.get("damage_ratio", 1.0))
+	var attack_range := _weapon_attack_range(selected_weapon)
+	var target := _nearest_target(attack_range)
 	var target_position: Vector2 = target.get("position", player_position + Vector2(facing * 120.0, 0.0))
 	var direction := (target_position - player_position).normalized()
 	if direction == Vector2.ZERO:
 		direction = Vector2(facing, 0.0)
 	facing = signf(direction.x) if absf(direction.x) > 0.1 else facing
-	var anim_target := target
-	if selected_weapon == "pencil_sword":
-		anim_target = _nearest_target(185.0)
-	elif selected_weapon == "orbit_line":
-		anim_target = _nearest_target(58.0)
-	if not anim_target.is_empty():
+	attack_indicator_timer = 0.22
+	attack_indicator_range = attack_range
+	attack_indicator_direction = direction
+	attack_indicator_target = target_position if not target.is_empty() else player_position + direction * attack_range
+	attack_indicator_area_radius = float(weapon.get("area_radius", 0.0))
+	attack_indicator_area_center = str(weapon.get("area_center", "target"))
+	if not target.is_empty():
 		var weapon_durations := [0.34, 0.46, 0.52, 0.44, 0.48, 0.52, 0.42, 0.36, 0.52]
 		var weapon_row := _weapon_icon_index(selected_weapon)
 		_start_player_animation(weapon_row, float(weapon_durations[weapon_row]), true)
@@ -1946,7 +2047,7 @@ func _auto_attack() -> void:
 				_damage_boss(damage * damage_ratio)
 		"ruler_spear":
 			if not target.is_empty():
-				var end := player_position + direction * minf(430.0, player_position.distance_to(target_position) + 45.0)
+				var end := player_position + direction * minf(attack_range, player_position.distance_to(target_position) + 45.0)
 				slash_timer = 0.2
 				for enemy in enemies.duplicate():
 					if _segment_distance(enemy.position, player_position, end) < float(enemy.radius) + 16.0:
@@ -1965,7 +2066,7 @@ func _auto_attack() -> void:
 				_spawn_player_shot("paper_plane", direction * 290.0, player_position, damage * damage_ratio, 2.4)
 		"compass_spear":
 			if not target.is_empty():
-				var end := player_position + direction * 475.0
+				var end := player_position + direction * minf(attack_range, player_position.distance_to(target_position) + 45.0)
 				slash_timer = 0.24
 				for enemy in enemies.duplicate():
 					if _segment_distance(enemy.position, player_position, end) < float(enemy.radius) + 20.0:
@@ -1996,10 +2097,10 @@ func _effective_damage() -> float:
 
 
 func _weapon_attack_power(item: Dictionary) -> float:
-	var rarity := clampi(int(item.get("rarity", 0)), 0, RARITY_DAMAGE.size() - 1)
-	var enhancement := clampi(int(item.get("enhancement", 0)), 0, MAX_ENHANCEMENT)
+	var rarity := clampi(int(item.get("rarity", 0)), 0, GAME_DATA.RARITY_DAMAGE.size() - 1)
+	var enhancement := clampi(int(item.get("enhancement", 0)), 0, GAME_DATA.MAX_ENHANCEMENT)
 	var attack_bonus := _potential_total(item, "attack")
-	return 25.0 * float(RARITY_DAMAGE[rarity]) * pow(1.1, float(enhancement)) * (1.0 + attack_bonus / 100.0)
+	return GAME_DATA.PLAYER_BASE_DAMAGE * float(GAME_DATA.RARITY_DAMAGE[rarity]) * pow(1.1, float(enhancement)) * (1.0 + attack_bonus / 100.0)
 
 
 func _damage_enemy(enemy: Dictionary, amount: float) -> void:
@@ -2032,7 +2133,7 @@ func _kill_enemy(enemy: Dictionary) -> void:
 	if rng.randf() < fragment_chance:
 		drops.append({"position":shard_position, "type":"weapon_shard", "amount":1, "life":25.0})
 		_burst(enemy.position, Color("57bdb4"), 5)
-	var magic_chance := MAGIC_SHARD_DROP_CHANCE + (0.08 if enemy.kind == "elite" else 0.0)
+	var magic_chance := GAME_DATA.MAGIC_SHARD_DROP_CHANCE + (0.08 if enemy.kind == "elite" else 0.0)
 	if rng.randf() < magic_chance:
 		drops.append({"position":shard_position + Vector2(11.0, -8.0), "type":"magic_shard", "amount":1, "life":25.0})
 		_burst(shard_position, Color("68d4cf"), 7)
@@ -2053,9 +2154,9 @@ func dash() -> void:
 	invulnerability = 0.48
 	dash_timer = 0.2
 	_start_player_animation(3, 0.32)
-	dash_cooldown = DASH_COOLDOWN_DURATION
-	var dash_skill := _skill_data(DASH_SKILL_ID)
-	var dash_damage_ratio := float(dash_skill.get("damage_ratio", 1.35)) * _skill_strength(DASH_SKILL_ID)
+	dash_cooldown = GAME_DATA.DASH_COOLDOWN_DURATION
+	var dash_skill := _skill_data(GAME_DATA.DASH_SKILL_ID)
+	var dash_damage_ratio := float(dash_skill.get("damage_ratio", 1.35)) * _skill_strength(GAME_DATA.DASH_SKILL_ID)
 	for enemy in enemies.duplicate():
 		if _segment_distance(enemy.position, old_position, player_position) < float(enemy.radius) + 13.0:
 			_damage_enemy(enemy, _effective_damage() * dash_damage_ratio)
@@ -2079,25 +2180,26 @@ func _update_boss(delta: float) -> void:
 		if boss.warning <= 0.0:
 			if boss.phase == 1:
 				if absf(player_position.y - float(boss.aim_y)) < 42.0:
-					_hurt(35.0)
+					_hurt(42.0)
 				boss.position.y = clampf(boss.position.y + rng.randf_range(-85.0, 85.0), 65.0, H - 70.0)
 			else:
 				if player_position.distance_to(boss.position) < 100.0:
-					_hurt(30.0)
+					_hurt(38.0)
 				_burst(boss.position, Color("ad4a3e"), 20)
-			boss.attack = 2.1
+			boss.attack = 1.8
 	elif boss.attack <= 0.0:
 		boss.phase = 1 if rng.randf() < 0.55 else 2
 		boss.aim_y = player_position.y
-		boss.warning = 0.9
+		boss.warning = 0.75
 	elif boss.position.distance_to(player_position) > 155.0:
-		boss.position = boss.position.move_toward(player_position, 28.0 * delta)
+		boss.position = boss.position.move_toward(player_position, 35.0 * delta)
 
 
 func _damage_boss(amount: float) -> void:
 	if boss.is_empty():
 		return
-	boss.hp -= amount
+	var boss_damage_bonus := _potential_total(_equipped_item(), "boss_damage")
+	boss.hp -= amount * (1.0 + boss_damage_bonus / 100.0)
 	boss.flash = 0.15
 	boss.hit_time = 0.15
 	_burst(boss.position, Color("d65a46"), 8)
@@ -2120,7 +2222,7 @@ func _hurt(amount: float) -> void:
 
 
 func finish(won: bool) -> void:
-	var finished_stage: String = STAGE_IDS[stage_index]
+	var finished_stage: String = GAME_DATA.STAGE_IDS[stage_index]
 	if won:
 		var first_clear := not cleared_stages.has(finished_stage)
 		var clear_gold := (100 + stage_index * 40) if first_clear else (60 + stage_index * 25)
@@ -2128,7 +2230,7 @@ func finish(won: bool) -> void:
 		var clear_award := roundi(float(clear_gold) * (1.0 + gold_bonus / 100.0))
 		gold += clear_award
 		var reward_message := "%s 클리어 골드 %d" % [finished_stage, clear_award]
-		if BOSS_STAGES.has(finished_stage):
+		if GAME_DATA.BOSS_STAGES.has(finished_stage):
 			var boss_gold := (400 + stage_index * 100) if first_clear else (200 + stage_index * 50)
 			var boss_award := roundi(float(boss_gold) * (1.0 + gold_bonus / 100.0))
 			gold += boss_award
@@ -2141,12 +2243,12 @@ func finish(won: bool) -> void:
 			reward_message += " + 마력 조각 3개"
 		if first_clear:
 			cleared_stages.append(finished_stage)
-		furthest_stage_index = maxi(furthest_stage_index, mini(stage_index + 1, STAGE_IDS.size() - 1))
-		stage_index = maxi(furthest_stage_index, mini(stage_index + 1, STAGE_IDS.size() - 1))
-		last_lobby_message = "%s · 다음 출전 %s" % [reward_message, STAGE_IDS[stage_index]]
+		furthest_stage_index = maxi(furthest_stage_index, mini(stage_index + 1, GAME_DATA.STAGE_IDS.size() - 1))
+		stage_index = maxi(furthest_stage_index, mini(stage_index + 1, GAME_DATA.STAGE_IDS.size() - 1))
+		last_lobby_message = "%s · 다음 출전 %s" % [reward_message, GAME_DATA.STAGE_IDS[stage_index]]
 	else:
 		stage_index = maxi(0, stage_index - 1)
-		last_lobby_message = "%s에서 쓰러졌습니다. 한 단계 후퇴해 %s부터 재도전합니다. 정산된 무기와 조각은 유지됩니다." % [finished_stage, STAGE_IDS[stage_index]]
+		last_lobby_message = "%s에서 쓰러졌습니다. 한 단계 후퇴해 %s부터 재도전합니다. 정산된 무기와 조각은 유지됩니다." % [finished_stage, GAME_DATA.STAGE_IDS[stage_index]]
 	_save_progress()
 	_reset_run()
 	show_lobby()
@@ -2160,7 +2262,7 @@ func _update_hud() -> void:
 	var target_count := stage_enemy_quota + (1 if stage_boss_spawned else 0)
 	var remaining_count := maxi(0, target_count - kills)
 	var objective := "보스 처치" if stage_boss_spawned else "남은 적 %d" % remaining_count
-	hud_label.text = "%s · %s +%d\n체력 %.0f / %.0f\n골드 %d · 무기 %d · 마력 %d\n처치 %d / %d  ·  %s\n경과 %s" % [STAGE_IDS[stage_index], _weapon_name(selected_weapon), int(_equipped_item().get("enhancement", 0)), player_hp, player_max_hp, gold, weapon_shards, magic_shards, kills, target_count, objective, _format_time(elapsed)]
+	hud_label.text = "%s · %s +%d\n체력 %.0f / %.0f\n골드 %d · 무기 %d · 마력 %d\n처치 %d / %d  ·  %s\n경과 %s" % [GAME_DATA.STAGE_IDS[stage_index], _weapon_name(selected_weapon), int(_equipped_item().get("enhancement", 0)), player_hp, player_max_hp, gold, weapon_shards, magic_shards, kills, target_count, objective, _format_time(elapsed)]
 	hp_bar.max_value = player_max_hp
 	hp_bar.value = player_hp
 	_update_skill_hud()

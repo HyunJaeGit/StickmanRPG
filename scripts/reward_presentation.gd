@@ -15,6 +15,7 @@ var enhancement_status: Label
 var enhancement_summary: Label
 var enhancement_button: Button
 var enhancement_close_button: Button
+var enhancement_sparks: Label
 var cube_line_labels: Array[Label] = []
 var cube_cost_label: Label
 var cube_status: Label
@@ -217,7 +218,7 @@ func animate_potential_roll(weapon_icon: Texture2D, preview_lines: Array[String]
 		await get_tree().create_timer(0.09).timeout
 
 
-func open_enhancement_window(weapon_icon: Texture2D, weapon_name: String, level: int, cost: int, gold: int) -> void:
+func open_enhancement_window(weapon_icon: Texture2D, weapon_name: String, level: int, cost: int, gold: int, current_damage: float, success_chance: float) -> void:
 	_fit_panel(Vector2(560.0, 500.0))
 	var content := _begin("무기 강화", "STAR FORCE  ·  별을 쌓아 무기를 성장시킵니다", Color("d99a48"))
 	var icon_row := HBoxContainer.new()
@@ -238,6 +239,11 @@ func open_enhancement_window(weapon_icon: Texture2D, weapon_name: String, level:
 	star_strip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	star_strip.add_theme_font_size_override("font_size", 18)
 	content.add_child(star_strip)
+	enhancement_sparks = Label.new()
+	enhancement_sparks.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	enhancement_sparks.add_theme_font_size_override("font_size", 24)
+	enhancement_sparks.add_theme_color_override("font_color", Color("f5d675"))
+	content.add_child(enhancement_sparks)
 	enhancement_progress = ProgressBar.new()
 	enhancement_progress.custom_minimum_size = Vector2(380.0, 18.0)
 	enhancement_progress.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -263,10 +269,10 @@ func open_enhancement_window(weapon_icon: Texture2D, weapon_name: String, level:
 	enhancement_close_button.custom_minimum_size.y = 48.0
 	enhancement_close_button.pressed.connect(_close_weapon_window)
 	actions.add_child(enhancement_close_button)
-	update_enhancement_window(level, cost, gold)
+	update_enhancement_window(level, cost, gold, current_damage, success_chance)
 
 
-func update_enhancement_window(level: int, cost: int, gold: int) -> void:
+func update_enhancement_window(level: int, cost: int, gold: int, current_damage: float, success_chance: float) -> void:
 	if not is_instance_valid(enhancement_status):
 		return
 	var safe_level := clampi(level, 0, 20)
@@ -275,23 +281,31 @@ func update_enhancement_window(level: int, cost: int, gold: int) -> void:
 	if star_strip != null:
 		star_strip.text = "★".repeat(safe_level) + "☆".repeat(20 - safe_level)
 	enhancement_progress.value = safe_level
-	enhancement_summary.text = "보유 골드  %d     ·     다음 시도 비용  %d 골드" % [gold, cost]
+	var projected_damage := current_damage * 1.1
+	enhancement_summary.text = "성공 확률  %.0f%%    ·    공격력  %.1f → %.1f\n보유 골드  %d    ·    시도 비용  %d 골드\n실패 시 별 단계 유지 · 골드만 소모" % [success_chance, current_damage, projected_damage, gold, cost]
 	enhancement_button.text = "강화 시도  ·  %d 골드" % cost if safe_level < 20 else "강화 최대 단계"
 	enhancement_button.disabled = safe_level >= 20 or gold < cost
 
 
-func animate_enhancement_attempt(old_level: int, next_level: int) -> void:
+func animate_enhancement_attempt(old_level: int, next_level: int, succeeded: bool) -> void:
 	_enhancement_set_busy(true)
 	for step in 10:
-		enhancement_progress.value = float(old_level) + float(step + 1) / 10.0
-		enhancement_status.text = ["별의 기운을 모읍니다", "강화석을 두드립니다", "무기에 힘을 새깁니다", "강화 성공!"][mini(3, step / 3)]
+		enhancement_progress.value = float(old_level) + float(step + 1) / 10.0 if succeeded else float(old_level)
+		enhancement_status.text = ["별의 기운을 모읍니다", "강화석을 두드립니다", "무기에 힘을 새깁니다", "결과를 확인합니다"][mini(3, step / 3)]
 		enhancement_icon.rotation = rng.randf_range(-0.08, 0.08)
 		enhancement_icon.scale = Vector2.ONE * rng.randf_range(0.94, 1.07)
+		if is_instance_valid(enhancement_sparks):
+			enhancement_sparks.text = ["✦", "✦  ✧  ✦", "✧  ✦  ✧  ✦"][step % 3]
 		await get_tree().create_timer(0.075).timeout
 	enhancement_icon.rotation = 0.0
 	enhancement_icon.scale = Vector2.ONE
-	enhancement_status.text = "+%d 강화 성공!" % next_level
+	if is_instance_valid(enhancement_sparks):
+		enhancement_sparks.text = "✦  ✧  ✦" if succeeded else "✧  ·  ✧"
+		enhancement_sparks.add_theme_color_override("font_color", Color("f5d675") if succeeded else Color("a9a39a"))
+	enhancement_status.text = "+%d 강화 성공!" % next_level if succeeded else "강화 실패 · +%d 유지" % old_level
 	await get_tree().create_timer(0.24).timeout
+	if is_instance_valid(enhancement_sparks):
+		enhancement_sparks.text = ""
 	enhancement_close_button.disabled = false
 
 
