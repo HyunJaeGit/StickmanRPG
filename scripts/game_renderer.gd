@@ -232,7 +232,3 @@ func _draw_boss() -> void:
 	var recoil: Vector2 = (boss_position - game.player_position).normalized() * 7.0 if float(game.boss.get("hit_time", 0.0)) > 0.0 else Vector2.ZERO
 	var boss_direction := 1.0 if game.player_position.x >= boss_position.x else -1.0
 	_draw_character(boss_position + recoil, Vector2(126.0, 142.0), 5, boss_tint, boss_direction)
-	if game.boss_mechanic_message_timer > 0.0 and not game.boss_mechanic_message.is_empty():
-		var message_color := Color("9cddff") if special_state in ["gather", "charge", "slam"] else Color("f7e7cb")
-		draw_rect(Rect2(140.0, 118.0, 680.0, 44.0), Color(0.08, 0.13, 0.18, 0.82), true)
-		draw_string(ThemeDB.fallback_font, Vector2(480.0, 148.0), game.boss_mechanic_message, HORIZONTAL_ALIGNMENT_CENTER, 660.0, 24, message_color)

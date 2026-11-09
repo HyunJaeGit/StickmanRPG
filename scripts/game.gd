@@ -81,6 +81,10 @@ var ui: CanvasLayer
 var hud_label: Label
 var hp_bar: ProgressBar
 var boss_bar: ProgressBar
+var boss_danger_overlay: ColorRect
+var boss_alert_panel: PanelContainer
+var boss_alert_label: Label
+var boss_alert_visual_state := ""
 var overlay: ColorRect
 var overlay_panel: PanelContainer
 var lobby_panel: PanelContainer
@@ -231,6 +235,37 @@ func _build_ui() -> void:
 		slot_body.add_child(slot_label)
 		skill_slot_labels.append(slot_label)
 		skill_hud.add_child(slot)
+	boss_danger_overlay = ColorRect.new()
+	boss_danger_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	boss_danger_overlay.color = Color(0.72, 0.04, 0.02, 0.0)
+	boss_danger_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(boss_danger_overlay)
+	boss_alert_panel = PanelContainer.new()
+	boss_alert_panel.position = Vector2(150.0, 126.0)
+	boss_alert_panel.size = Vector2(660.0, 62.0)
+	boss_alert_panel.custom_minimum_size = Vector2(660.0, 62.0)
+	boss_alert_panel.pivot_offset = Vector2(330.0, 31.0)
+	var boss_alert_style := _flat_style(Color("22343f"))
+	boss_alert_style.set_border_width_all(2)
+	boss_alert_style.border_color = Color("66caff")
+	boss_alert_panel.add_theme_stylebox_override("panel", boss_alert_style)
+	boss_alert_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var alert_margin := MarginContainer.new()
+	alert_margin.add_theme_constant_override("margin_left", 12)
+	alert_margin.add_theme_constant_override("margin_right", 12)
+	alert_margin.add_theme_constant_override("margin_top", 6)
+	alert_margin.add_theme_constant_override("margin_bottom", 6)
+	boss_alert_panel.add_child(alert_margin)
+	boss_alert_label = Label.new()
+	boss_alert_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	boss_alert_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	boss_alert_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	boss_alert_label.add_theme_font_size_override("font_size", 22)
+	boss_alert_label.add_theme_color_override("font_color", Color("bdeaff"))
+	alert_margin.add_child(boss_alert_label)
+	ui.add_child(boss_alert_panel)
+	boss_danger_overlay.hide()
+	boss_alert_panel.hide()
 	overlay = ColorRect.new()
 	overlay.theme = ui_theme
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -1658,6 +1693,10 @@ func _reset_run() -> void:
 	particles.clear()
 	boss.clear()
 	boss_bar.hide()
+	if is_instance_valid(boss_danger_overlay):
+		boss_danger_overlay.hide()
+	if is_instance_valid(boss_alert_panel):
+		boss_alert_panel.hide()
 
 
 func _load_progress() -> void:
@@ -2389,6 +2428,50 @@ func _update_hud() -> void:
 	if not boss.is_empty():
 		boss_bar.max_value = boss.max_hp
 		boss_bar.value = boss.hp
+	_update_boss_alert_ui()
+
+
+func _update_boss_alert_ui() -> void:
+	if not is_instance_valid(boss_danger_overlay) or not is_instance_valid(boss_alert_panel):
+		return
+	var special_state := str(boss.get("special_state", "")) if not boss.is_empty() else ""
+	var dangerous := mode == "playing" and special_state in ["gather", "charge", "slam"]
+	var has_message := dangerous or (mode == "playing" and boss_mechanic_message_timer > 0.0 and not boss_mechanic_message.is_empty())
+	boss_danger_overlay.visible = dangerous
+	boss_alert_panel.visible = has_message
+	if not has_message:
+		boss_alert_visual_state = ""
+		return
+	var alert_state := "prepare" if special_state in ["gather", "charge"] else "counter" if special_state == "slam" else "result"
+	if boss_alert_visual_state != alert_state:
+		boss_alert_visual_state = alert_state
+		if alert_state == "prepare":
+			boss_alert_label.text = "⚠  보스가 강력한 공격을 준비중입니다  ⚠"
+			boss_alert_label.add_theme_color_override("font_color", Color("bdeaff"))
+			boss_alert_panel.add_theme_stylebox_override("panel", _boss_alert_style(Color("22343f"), Color("66caff")))
+		elif alert_state == "counter":
+			boss_alert_label.text = "정확한 타이밍에 G키를 눌러 반격하세요"
+			boss_alert_label.add_theme_color_override("font_color", Color("fff0a2"))
+			boss_alert_panel.add_theme_stylebox_override("panel", _boss_alert_style(Color("49312a"), Color("ffbd68")))
+		else:
+			boss_alert_label.text = boss_mechanic_message
+			boss_alert_label.add_theme_color_override("font_color", Color("f7e7cb"))
+			boss_alert_panel.add_theme_stylebox_override("panel", _boss_alert_style(Color("26373e"), Color("c9a766")))
+	var pulse := 0.5 + 0.5 * sin(elapsed * 12.0)
+	boss_danger_overlay.color.a = 0.045 + pulse * 0.045
+	boss_alert_panel.scale = Vector2.ONE * (1.0 + pulse * 0.015)
+
+
+func _boss_alert_style(background: Color, outline: Color) -> StyleBoxFlat:
+	var style := _flat_style(background)
+	style.set_border_width_all(2)
+	style.border_color = outline
+	style.set_corner_radius_all(10)
+	style.content_margin_left = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_top = 6.0
+	style.content_margin_bottom = 6.0
+	return style
 
 
 func _burst(burst_origin: Vector2, color: Color, amount: int) -> void:
