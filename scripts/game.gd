@@ -4,6 +4,8 @@ extends Node2D
 const W := 960.0
 const H := 540.0
 const GAME_DATA = preload("res://scripts/game_data.gd")
+const WEAPON_RULES = preload("res://scripts/weapon_rules.gd")
+const LOBBY_VIEW_SCRIPT = preload("res://scripts/lobby_view.gd")
 const RENDERER_SCENE: PackedScene = preload("res://scenes/game_renderer.tscn")
 const REWARD_PRESENTATION_SCENE: PackedScene = preload("res://scenes/reward_presentation.tscn")
 const CHARACTER_ATLAS: Texture2D = preload("res://art/stickman_characters_atlas.png")
@@ -77,6 +79,7 @@ var boss_mechanic_message_timer := 0.0
 var rng := RandomNumberGenerator.new()
 var game_renderer: GameRenderer
 var reward_presentation: RewardPresentation
+var lobby_view: LobbyView
 var ui: CanvasLayer
 var hud_label: Label
 var hp_bar: ProgressBar
@@ -87,16 +90,6 @@ var boss_alert_label: Label
 var boss_alert_visual_state := ""
 var overlay: ColorRect
 var overlay_panel: PanelContainer
-var lobby_panel: PanelContainer
-var lobby_status: Label
-var lobby_stage_label: Label
-var lobby_weapon_label: Label
-var lobby_weapon_desc: Label
-var lobby_stat_values: Dictionary = {}
-var lobby_message: Label
-var lobby_stage_path: HBoxContainer
-var lobby_enter_button: Button
-var lobby_gacha_button: Button
 var skill_hud: HBoxContainer
 var skill_slot_icons: Array[TextureRect] = []
 var skill_slot_labels: Array[Label] = []
@@ -284,6 +277,12 @@ func _build_ui() -> void:
 	lobby_style.content_margin_bottom = 18.0
 	overlay_panel.add_theme_stylebox_override("panel", lobby_style)
 	center.add_child(overlay_panel)
+	lobby_view = LOBBY_VIEW_SCRIPT.new() as LobbyView
+	lobby_view.start_requested.connect(start_run)
+	lobby_view.menu_requested.connect(_on_lobby_menu_requested)
+	lobby_view.stage_requested.connect(_select_lobby_stage)
+	lobby_view.theme = ui_theme
+	ui.add_child(lobby_view)
 	overlay.hide()
 
 
@@ -362,215 +361,54 @@ func show_lobby() -> void:
 	skill_hud.visible = false
 	get_tree().paused = false
 	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	overlay.color = Color(0.05, 0.04, 0.03, 0.73)
-	var lobby_style := _lobby_surface(Color("f2e6cf"), Color("b8a27f"))
-	lobby_style.set_border_width_all(1)
-	lobby_style.content_margin_left = 24.0
-	lobby_style.content_margin_right = 24.0
-	lobby_style.content_margin_top = 14.0
-	lobby_style.content_margin_bottom = 14.0
-	overlay_panel.add_theme_stylebox_override("panel", lobby_style)
-	for child in overlay_panel.get_children():
-		overlay_panel.remove_child(child)
-		child.queue_free()
-	var lobby_view_size := get_viewport().get_visible_rect().size
-	overlay_panel.custom_minimum_size = Vector2(minf(840.0, lobby_view_size.x - 64.0), minf(450.0, lobby_view_size.y - 64.0))
-	overlay_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	var frame := VBoxContainer.new()
-	frame.add_theme_constant_override("separation", 8)
-	overlay_panel.add_child(frame)
-	var top := HBoxContainer.new()
-	top.custom_minimum_size.y = 42.0
-	top.add_theme_constant_override("separation", 12)
-	frame.add_child(top)
-	var title := Label.new()
-	title.text = "STICKMAN RPG  /  모험의 거점"
-	title.add_theme_font_size_override("font_size", 20)
-	title.add_theme_color_override("font_color", Color("3a342d"))
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top.add_child(title)
-	lobby_status = Label.new()
-	lobby_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	lobby_status.custom_minimum_size = Vector2(350.0, 36.0)
-	lobby_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lobby_status.add_theme_font_size_override("font_size", 14)
-	lobby_status.add_theme_color_override("font_color", Color("766650"))
-	top.add_child(lobby_status)
-	var divider := HSeparator.new()
-	frame.add_child(divider)
-	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 12)
-	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	frame.add_child(main)
-	var showcase := VBoxContainer.new()
-	showcase.custom_minimum_size.x = 240
-	showcase.alignment = BoxContainer.ALIGNMENT_CENTER
-	showcase.add_theme_constant_override("separation", 3)
-	main.add_child(showcase)
-	var portrait := PanelContainer.new()
-	portrait.custom_minimum_size = Vector2(220, 100)
-	portrait.add_theme_stylebox_override("panel", _flat_style(Color("e8dcc7")))
-	var hero_preview := TextureRect.new()
-	var hero_atlas := AtlasTexture.new()
-	hero_atlas.atlas = CHARACTER_ATLAS
-	hero_atlas.region = Rect2(0.0, 0.0, CHARACTER_CELL, CHARACTER_CELL)
-	hero_preview.texture = hero_atlas
-	hero_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	hero_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	portrait.add_child(hero_preview)
-	showcase.add_child(portrait)
-	lobby_weapon_label = Label.new()
-	lobby_weapon_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lobby_weapon_label.add_theme_font_size_override("font_size", 19)
-	showcase.add_child(lobby_weapon_label)
-	lobby_weapon_desc = Label.new()
-	lobby_weapon_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lobby_weapon_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lobby_weapon_desc.add_theme_font_size_override("font_size", 14)
-	showcase.add_child(lobby_weapon_desc)
-	lobby_stat_values.clear()
-	var stats_card := _lobby_card(showcase, Color("f7efdf"), Color("c7b58d"))
-	var stats_style := _lobby_surface(Color("f7efdf"), Color("c7b58d"))
-	stats_style.content_margin_left = 10.0
-	stats_style.content_margin_right = 10.0
-	stats_style.content_margin_top = 5.0
-	stats_style.content_margin_bottom = 5.0
-	stats_card.add_theme_stylebox_override("panel", stats_style)
-	var stats_column := VBoxContainer.new()
-	stats_column.add_theme_constant_override("separation", 2)
-	stats_card.add_child(stats_column)
-	var stats_title := Label.new()
-	stats_title.text = "전투 스탯"
-	stats_title.add_theme_font_size_override("font_size", 14)
-	stats_title.add_theme_color_override("font_color", Color("766650"))
-	stats_column.add_child(stats_title)
-	var stats_grid := GridContainer.new()
-	stats_grid.columns = 2
-	stats_grid.add_theme_constant_override("h_separation", 10)
-	stats_grid.add_theme_constant_override("v_separation", 1)
-	stats_column.add_child(stats_grid)
-	for stat in [{"id":"health", "title":"최대 체력"}, {"id":"damage", "title":"공격력"}, {"id":"speed", "title":"이동 속도"}, {"id":"attack_rate", "title":"초당 공격"}]:
-		var stat_cell := VBoxContainer.new()
-		stat_cell.add_theme_constant_override("separation", 0)
-		stats_grid.add_child(stat_cell)
-		var stat_title := Label.new()
-		stat_title.text = str(stat.title)
-		stat_title.add_theme_font_size_override("font_size", 12)
-		stat_title.add_theme_color_override("font_color", Color("766f63"))
-		stat_cell.add_child(stat_title)
-		var stat_value := Label.new()
-		stat_value.add_theme_font_size_override("font_size", 14)
-		stat_value.add_theme_color_override("font_color", Color("3a342d"))
-		stat_cell.add_child(stat_value)
-		lobby_stat_values[str(stat.id)] = stat_value
-	var center := VBoxContainer.new()
-	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	center.add_theme_constant_override("separation", 5)
-	main.add_child(center)
-	lobby_stage_label = Label.new()
-	lobby_stage_label.add_theme_font_size_override("font_size", 22)
-	center.add_child(lobby_stage_label)
-	var route_title := Label.new()
-	route_title.text = "CHAPTER 1   ·   먹물 숲의 경로"
-	route_title.add_theme_color_override("font_color", Color("766650"))
-	center.add_child(route_title)
-	lobby_stage_path = HBoxContainer.new()
-	lobby_stage_path.add_theme_constant_override("separation", 4)
-	center.add_child(lobby_stage_path)
-	lobby_message = Label.new()
-	lobby_message.custom_minimum_size.y = 38
-	lobby_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lobby_message.add_theme_color_override("font_color", Color("8b5947"))
-	center.add_child(lobby_message)
-	var enter := Button.new()
-	enter.text = "%s  출전하기" % GAME_DATA.STAGE_IDS[stage_index]
-	enter.custom_minimum_size.y = 58
-	enter.add_theme_font_size_override("font_size", 22)
-	enter.pressed.connect(start_run)
-	center.add_child(enter)
-	lobby_enter_button = enter
-	var nav := HBoxContainer.new()
-	nav.custom_minimum_size.y = 50.0
-	nav.add_theme_constant_override("separation", 10)
-	frame.add_child(nav)
-	var armory := Button.new()
-	armory.text = "⚔  무기고"
-	armory.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	armory.custom_minimum_size.y = 50
-	armory.pressed.connect(func(): _open_lobby_window("armory"))
-	nav.add_child(armory)
-	var chest := Button.new()
-	chest.text = "▣  무기 뽑기  ·  %d 조각" % weapon_shards
-	chest.icon = _item_icon(11)
-	chest.add_theme_constant_override("icon_max_width", 38)
-	chest.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	chest.custom_minimum_size.y = 50
-	chest.pressed.connect(func(): _open_lobby_window("chest"))
-	nav.add_child(chest)
-	lobby_gacha_button = chest
-	var skills_button := Button.new()
-	skills_button.text = "✦ 스킬"
-	skills_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	skills_button.custom_minimum_size.y = 50
-	skills_button.pressed.connect(func(): _open_lobby_window("skills"))
-	nav.add_child(skills_button)
-	var settings := Button.new()
-	settings.text = "⚙ 설정"
-	settings.custom_minimum_size = Vector2(110.0, 50.0)
-	settings.pressed.connect(func(): _open_lobby_window("settings"))
-	nav.add_child(settings)
-	_update_skill_hud()
-	_update_lobby()
-	overlay.show()
+	overlay.hide()
+	lobby_view.show_home(_lobby_view_state())
 
+
+func _lobby_view_state() -> Dictionary:
+	var item := _equipped_item()
+	var portrait_texture := AtlasTexture.new()
+	portrait_texture.atlas = CHARACTER_ATLAS
+	portrait_texture.region = Rect2(0.0, 0.0, CHARACTER_CELL, CHARACTER_CELL)
+	return {
+		"gold":gold,
+		"weapon_shards":weapon_shards,
+		"magic_shards":magic_shards,
+		"stage_id":GAME_DATA.STAGE_IDS[stage_index],
+		"stage_index":stage_index,
+		"furthest_stage_index":furthest_stage_index,
+		"stage_ids":GAME_DATA.STAGE_IDS,
+		"cleared_stages":cleared_stages,
+		"weapon_name":_weapon_name(selected_weapon),
+		"weapon_description":_weapon_description(selected_weapon),
+		"portrait":portrait_texture,
+		"message":last_lobby_message,
+		"stats":{
+			"health":"%.0f" % _player_max_health_for_item(item),
+			"damage":"%.1f" % _weapon_attack_power(item),
+			"speed":"%.0f" % _player_move_speed_for_item(item),
+			"attack_rate":"%.1f회/초" % (1.0 / _player_attack_interval_for_item(item))
+		}
+	}
+
+
+func _on_lobby_menu_requested(section: String) -> void:
+	_open_lobby_window(section)
 
 func _update_lobby() -> void:
-	if lobby_status == null:
-		return
-	lobby_status.text = "골드 %d  ·  무기 조각 %d  ·  마력 조각 %d" % [gold, weapon_shards, magic_shards]
-	lobby_gacha_button.text = "▣  무기 뽑기  ·  %d 조각" % weapon_shards
-	lobby_stage_label.text = "현재 출전 단계   %s" % GAME_DATA.STAGE_IDS[stage_index]
-	lobby_enter_button.text = "%s  출전하기" % GAME_DATA.STAGE_IDS[stage_index]
-	lobby_weapon_label.text = "장착 무기  ·  %s" % _weapon_name(selected_weapon)
-	lobby_weapon_desc.text = _weapon_description(selected_weapon)
-	_update_lobby_stats()
-	lobby_message.text = last_lobby_message
-	for child in lobby_stage_path.get_children():
-		lobby_stage_path.remove_child(child)
-		child.queue_free()
-	for index in GAME_DATA.STAGE_IDS.size():
-		var node := Button.new()
-		var stage_id: String = GAME_DATA.STAGE_IDS[index]
-		var cleared := cleared_stages.has(stage_id)
-		var current := index == stage_index
-		var unlocked := index <= furthest_stage_index or current
-		node.text = ("✓ " if cleared else "◆ " if current else "○ ") + stage_id if unlocked else "🔒 " + stage_id
-		node.disabled = not unlocked
-		node.custom_minimum_size = Vector2(82, 48)
-		if current:
-			node.add_theme_color_override("font_color", Color("a74235"))
-		node.pressed.connect(_select_lobby_stage.bind(index))
-		lobby_stage_path.add_child(node)
-
-
-func _update_lobby_stats() -> void:
-	var item := _equipped_item()
-	lobby_stat_values["health"].text = "%.0f" % _player_max_health_for_item(item)
-	lobby_stat_values["damage"].text = "%.1f" % _weapon_attack_power(item)
-	lobby_stat_values["speed"].text = "%.0f" % _player_move_speed_for_item(item)
-	lobby_stat_values["attack_rate"].text = "%.1f회/초" % (1.0 / _player_attack_interval_for_item(item))
-
+	if is_instance_valid(lobby_view):
+		lobby_view.update_home(_lobby_view_state())
 
 func _player_max_health_for_item(item: Dictionary) -> float:
-	return GAME_DATA.PLAYER_BASE_HEALTH * (1.0 + _potential_total(item, "max_health") / 100.0)
+	return WEAPON_RULES.max_health(item)
 
 
 func _player_move_speed_for_item(item: Dictionary) -> float:
-	return GAME_DATA.PLAYER_BASE_SPEED * (1.0 + _potential_total(item, "move_speed") / 100.0)
+	return WEAPON_RULES.move_speed(item)
 
 
 func _player_attack_interval_for_item(item: Dictionary) -> float:
-	return GAME_DATA.PLAYER_BASE_ATTACK_INTERVAL * 100.0 / (100.0 + _potential_total(item, "attack_speed"))
+	return WEAPON_RULES.attack_interval(item)
 
 
 func _weapon_profile(weapon_id: String) -> Dictionary:
@@ -619,6 +457,7 @@ func _lobby_card(parent: Control, color: Color, edge: Color = Color("5d6662")) -
 
 
 func _open_lobby_window(section: String) -> void:
+	lobby_view.hide()
 	lobby_section = section
 	if section == "skills" and selected_skill_slot < 0:
 		selected_skill_slot = 0
@@ -1369,18 +1208,15 @@ func _refresh_lobby_window() -> void:
 
 
 func _enhancement_cost(item: Dictionary) -> int:
-	var level_value := int(item.get("enhancement", 0))
-	var rarity := int(item.get("rarity", 0))
-	return 50 * (level_value + 1) * (level_value + 1) * (rarity + 1)
+	return WEAPON_RULES.enhancement_cost(item)
 
 
 func _enhancement_success_chance(level: int) -> float:
-	var chance_index := clampi(level, 0, GAME_DATA.ENHANCEMENT_SUCCESS_CHANCES.size() - 1)
-	return float(GAME_DATA.ENHANCEMENT_SUCCESS_CHANCES[chance_index])
+	return WEAPON_RULES.enhancement_success_chance(level)
 
 
 func _potential_reset_cost(item: Dictionary) -> int:
-	return 100 * (int(item.get("rarity", 0)) + 1)
+	return WEAPON_RULES.potential_reset_cost(item)
 
 
 func _potential_summary(item: Dictionary) -> String:
@@ -1413,11 +1249,7 @@ func _roll_potentials() -> Array[Dictionary]:
 
 
 func _potential_total(item: Dictionary, id: String) -> float:
-	var total := 0.0
-	for potential in item.get("potentials", []):
-		if str(potential.get("id", "")) == id:
-			total += float(potential.get("value", 0))
-	return total
+	return WEAPON_RULES.potential_total(item, id)
 
 
 func _can_synthesize_equipped() -> bool:
@@ -1650,6 +1482,7 @@ func _weapon_name(weapon_id: String) -> String:
 func start_run() -> void:
 	_reset_run()
 	mode = "playing"
+	lobby_view.hide()
 	skill_hud.visible = true
 	get_tree().paused = false
 	overlay.hide()
@@ -2157,10 +1990,7 @@ func _effective_damage() -> float:
 
 
 func _weapon_attack_power(item: Dictionary) -> float:
-	var rarity := clampi(int(item.get("rarity", 0)), 0, GAME_DATA.RARITY_DAMAGE.size() - 1)
-	var enhancement := clampi(int(item.get("enhancement", 0)), 0, GAME_DATA.MAX_ENHANCEMENT)
-	var attack_bonus := _potential_total(item, "attack")
-	return GAME_DATA.PLAYER_BASE_DAMAGE * float(GAME_DATA.RARITY_DAMAGE[rarity]) * pow(1.1, float(enhancement)) * (1.0 + attack_bonus / 100.0)
+	return WEAPON_RULES.attack_power(item)
 
 
 func _damage_enemy(enemy: Dictionary, amount: float) -> void:
