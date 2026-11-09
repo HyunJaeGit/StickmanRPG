@@ -4,7 +4,7 @@ extends Node2D
 const W := 960.0
 const H := 540.0
 const STAGE_IDS := ["1-1", "1-2", "1-3", "1-4", "1-5", "2-1"]
-const STAGE_LENGTHS := {"1-1":90.0, "1-2":90.0, "1-3":90.0, "1-4":90.0, "1-5":60.0, "2-1":90.0}
+const STAGE_ENEMY_COUNTS := {"1-1":24, "1-2":30, "1-3":36, "1-4":42, "1-5":36, "2-1":48}
 const BOSS_STAGES := ["1-5"]
 const GACHA_COST := 5
 const SKILL_GACHA_COST := 3
@@ -62,16 +62,21 @@ var weapon_shards := 0
 var magic_shards := 0
 var skills_owned: Array[String] = []
 var equipped_skill_slots: Array[String] = ["", "", "", ""]
+var skill_levels: Dictionary = {}
+var skill_cooldowns: Dictionary = {}
 var selected_weapon := "pencil_sword"
 var selected_weapon_uid := 1
 var next_weapon_uid := 1
 var weapon_inventory: Array[Dictionary] = []
+var last_weapon_draw: Dictionary = {}
 var cleared_stages: Array[String] = []
 var last_lobby_message := "스케치 세계에 오신 것을 환영합니다."
 var elapsed := 0.0
 var kills := 0
+var stage_enemy_quota := 24
+var stage_enemies_spawned := 0
+var stage_boss_spawned := false
 var spawn_timer := 0.0
-var elite_at := 35.0
 var attack_timer := 0.0
 var dash_timer := 0.0
 var dash_cooldown := 0.0
@@ -144,6 +149,14 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if mode == "playing" and not overlay.visible and not reward_presentation.shade.visible:
+		if event is InputEventKey and event.pressed and not event.echo:
+			var key_event := event as InputEventKey
+			var skill_keys := {KEY_Q:0, KEY_W:1, KEY_E:2, KEY_R:3}
+			if skill_keys.has(key_event.physical_keycode):
+				_use_skill(int(skill_keys[key_event.physical_keycode]))
+				get_viewport().set_input_as_handled()
+				return
 	if event.is_action_pressed("dash"):
 		dash()
 		get_viewport().set_input_as_handled()
@@ -187,11 +200,11 @@ func _build_ui() -> void:
 	var hud := HBoxContainer.new()
 	hud.theme = ui_theme
 	hud.position = Vector2(18, 14)
-	hud.size = Vector2(924, 76)
+	hud.size = Vector2(924, 100)
 	hud.add_theme_constant_override("separation", 20)
 	ui.add_child(hud)
 	hud_label = Label.new()
-	hud_label.custom_minimum_size = Vector2(270, 82)
+	hud_label.custom_minimum_size = Vector2(270, 98)
 	hud_label.add_theme_font_size_override("font_size", 16)
 	hud.add_child(hud_label)
 	var bars := VBoxContainer.new()
@@ -248,7 +261,13 @@ func _build_ui() -> void:
 	overlay.add_child(center)
 	overlay_panel = PanelContainer.new()
 	overlay_panel.custom_minimum_size = Vector2(520, 250)
-	overlay_panel.add_theme_stylebox_override("panel", _flat_style(Color("f2e6cf")))
+	var lobby_style := _lobby_surface(Color("f2e6cf"), Color("b8a27f"))
+	lobby_style.set_border_width_all(1)
+	lobby_style.content_margin_left = 24.0
+	lobby_style.content_margin_right = 24.0
+	lobby_style.content_margin_top = 18.0
+	lobby_style.content_margin_bottom = 18.0
+	overlay_panel.add_theme_stylebox_override("panel", lobby_style)
 	center.add_child(overlay_panel)
 	overlay.hide()
 
@@ -306,38 +325,52 @@ func show_lobby() -> void:
 	get_tree().paused = false
 	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	overlay.color = Color(0.05, 0.04, 0.03, 0.73)
-	overlay_panel.add_theme_stylebox_override("panel", _flat_style(Color("f2e6cf")))
+	var lobby_style := _lobby_surface(Color("f2e6cf"), Color("b8a27f"))
+	lobby_style.set_border_width_all(1)
+	lobby_style.content_margin_left = 24.0
+	lobby_style.content_margin_right = 24.0
+	lobby_style.content_margin_top = 18.0
+	lobby_style.content_margin_bottom = 18.0
+	overlay_panel.add_theme_stylebox_override("panel", lobby_style)
 	for child in overlay_panel.get_children():
 		overlay_panel.remove_child(child)
 		child.queue_free()
-	overlay_panel.custom_minimum_size = Vector2(850, 470)
+	var lobby_view_size := get_viewport().get_visible_rect().size
+	overlay_panel.custom_minimum_size = Vector2(minf(840.0, lobby_view_size.x - 64.0), minf(430.0, lobby_view_size.y - 64.0))
 	overlay_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var frame := VBoxContainer.new()
-	frame.add_theme_constant_override("separation", 10)
+	frame.add_theme_constant_override("separation", 12)
 	overlay_panel.add_child(frame)
 	var top := HBoxContainer.new()
+	top.custom_minimum_size.y = 46.0
+	top.add_theme_constant_override("separation", 12)
 	frame.add_child(top)
 	var title := Label.new()
 	title.text = "STICKMAN RPG  /  모험의 거점"
-	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", Color("3a342d"))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(title)
 	lobby_status = Label.new()
 	lobby_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lobby_status.custom_minimum_size = Vector2(350.0, 36.0)
+	lobby_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lobby_status.add_theme_font_size_override("font_size", 14)
+	lobby_status.add_theme_color_override("font_color", Color("766650"))
 	top.add_child(lobby_status)
 	var divider := HSeparator.new()
 	frame.add_child(divider)
 	var main := HBoxContainer.new()
-	main.add_theme_constant_override("separation", 20)
+	main.add_theme_constant_override("separation", 18)
 	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	frame.add_child(main)
 	var showcase := VBoxContainer.new()
-	showcase.custom_minimum_size.x = 250
+	showcase.custom_minimum_size.x = 240
 	showcase.alignment = BoxContainer.ALIGNMENT_CENTER
 	showcase.add_theme_constant_override("separation", 8)
 	main.add_child(showcase)
 	var portrait := PanelContainer.new()
-	portrait.custom_minimum_size = Vector2(230, 175)
+	portrait.custom_minimum_size = Vector2(220, 160)
 	portrait.add_theme_stylebox_override("panel", _flat_style(Color("e8dcc7")))
 	var hero_preview := TextureRect.new()
 	var hero_atlas := AtlasTexture.new()
@@ -383,11 +416,12 @@ func show_lobby() -> void:
 	center.add_child(enter)
 	lobby_enter_button = enter
 	var nav := HBoxContainer.new()
+	nav.add_theme_constant_override("separation", 10)
 	frame.add_child(nav)
 	var armory := Button.new()
 	armory.text = "⚔  무기고"
 	armory.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	armory.custom_minimum_size.y = 42
+	armory.custom_minimum_size.y = 50
 	armory.pressed.connect(func(): _open_lobby_window("armory"))
 	nav.add_child(armory)
 	var chest := Button.new()
@@ -395,19 +429,19 @@ func show_lobby() -> void:
 	chest.icon = _item_icon(11)
 	chest.add_theme_constant_override("icon_max_width", 38)
 	chest.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	chest.custom_minimum_size.y = 42
+	chest.custom_minimum_size.y = 50
 	chest.pressed.connect(func(): _open_lobby_window("chest"))
 	nav.add_child(chest)
 	lobby_gacha_button = chest
 	var skills_button := Button.new()
 	skills_button.text = "✦ 스킬"
 	skills_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	skills_button.custom_minimum_size.y = 42
+	skills_button.custom_minimum_size.y = 50
 	skills_button.pressed.connect(func(): _open_lobby_window("skills"))
 	nav.add_child(skills_button)
 	var settings := Button.new()
 	settings.text = "⚙ 설정"
-	settings.custom_minimum_size.y = 42
+	settings.custom_minimum_size = Vector2(110.0, 50.0)
 	settings.pressed.connect(func(): _open_lobby_window("settings"))
 	nav.add_child(settings)
 	_update_skill_hud()
@@ -418,7 +452,7 @@ func show_lobby() -> void:
 func _update_lobby() -> void:
 	if lobby_status == null:
 		return
-	lobby_status.text = "골드 ◈ %d   무기 조각 ◆ %d   마력 조각 ✦ %d" % [gold, weapon_shards, magic_shards]
+	lobby_status.text = "골드 %d  ·  무기 조각 %d  ·  마력 조각 %d" % [gold, weapon_shards, magic_shards]
 	lobby_gacha_button.text = "▣  무기 뽑기  ·  %d 조각" % weapon_shards
 	lobby_stage_label.text = "현재 출전 단계   %s" % STAGE_IDS[stage_index]
 	lobby_enter_button.text = "%s  출전하기" % STAGE_IDS[stage_index]
@@ -460,6 +494,25 @@ func _select_lobby_stage(index: int) -> void:
 	_update_lobby()
 
 
+func _lobby_surface(color: Color, edge: Color = Color("5d6662")) -> StyleBoxFlat:
+	var style := _flat_style(color)
+	style.set_corner_radius_all(10)
+	style.set_border_width_all(1)
+	style.border_color = edge
+	style.content_margin_left = 14.0
+	style.content_margin_right = 14.0
+	style.content_margin_top = 10.0
+	style.content_margin_bottom = 10.0
+	return style
+
+
+func _lobby_card(parent: Control, color: Color, edge: Color = Color("5d6662")) -> PanelContainer:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", _lobby_surface(color, edge))
+	parent.add_child(card)
+	return card
+
+
 func _open_lobby_window(section: String) -> void:
 	lobby_section = section
 	if section == "skills" and selected_skill_slot < 0:
@@ -467,29 +520,45 @@ func _open_lobby_window(section: String) -> void:
 	for child in overlay_panel.get_children():
 		overlay_panel.remove_child(child)
 		child.queue_free()
-	overlay_panel.custom_minimum_size = Vector2(760.0, 430.0)
+	var menu_view_size := get_viewport().get_visible_rect().size
+	overlay_panel.custom_minimum_size = Vector2(minf(900.0, menu_view_size.x - 40.0), minf(500.0, menu_view_size.y - 40.0))
 	overlay_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var shell_style := _lobby_surface(Color("26373e"), Color("c9a766"))
+	shell_style.set_border_width_all(2)
+	shell_style.content_margin_left = 18.0
+	shell_style.content_margin_right = 18.0
+	shell_style.content_margin_top = 14.0
+	shell_style.content_margin_bottom = 14.0
+	overlay_panel.add_theme_stylebox_override("panel", shell_style)
 	var frame := VBoxContainer.new()
-	frame.add_theme_constant_override("separation", 10)
+	frame.add_theme_constant_override("separation", 8)
 	overlay_panel.add_child(frame)
 	var top := HBoxContainer.new()
+	top.custom_minimum_size.y = 48.0
 	frame.add_child(top)
 	var heading := Label.new()
 	heading.text = {"armory":"무기고", "chest":"무기 뽑기", "skills":"스킬 보관함", "settings":"설정", "help":"도움말"}.get(section, "메뉴")
 	heading.add_theme_font_size_override("font_size", 24)
+	heading.add_theme_color_override("font_color", Color("f3e9d4"))
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(heading)
 	var close := Button.new()
-	close.text = "닫기  ×"
-	close.custom_minimum_size = Vector2(82.0, 38.0)
+	close.text = "뒤로"
+	close.custom_minimum_size = Vector2(104.0, 42.0)
 	close.pressed.connect(_close_lobby_window)
 	top.add_child(close)
-	var divider := HSeparator.new()
-	frame.add_child(divider)
+	var body_card := _lobby_card(frame, Color("ede2cc"), Color("766d5d"))
+	body_card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var body_style := _lobby_surface(Color("ede2cc"), Color("766d5d"))
+	body_style.content_margin_left = 10.0
+	body_style.content_margin_right = 10.0
+	body_style.content_margin_top = 10.0
+	body_style.content_margin_bottom = 10.0
+	body_card.add_theme_stylebox_override("panel", body_style)
 	lobby_modal_body = VBoxContainer.new()
 	lobby_modal_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	lobby_modal_body.add_theme_constant_override("separation", 8)
-	frame.add_child(lobby_modal_body)
+	body_card.add_child(lobby_modal_body)
 	lobby_section = section
 	var content := _build_lobby_section()
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -500,7 +569,7 @@ func _open_lobby_window(section: String) -> void:
 func _close_lobby_window() -> void:
 	lobby_section = "home"
 	lobby_modal_body = null
-	overlay_panel.custom_minimum_size = Vector2(850.0, 470.0)
+	overlay_panel.custom_minimum_size = Vector2(840.0, 430.0)
 	show_lobby()
 
 
@@ -559,10 +628,11 @@ func _build_lobby_section() -> Control:
 			var equipped := _equipped_item()
 			var showcase := HBoxContainer.new()
 			showcase.add_theme_constant_override("separation", 12)
-			body.add_child(showcase)
+			var showcase_card := _lobby_card(body, Color("f7efdf"), Color("c49645"))
+			showcase_card.add_child(showcase)
 			var weapon_icon := TextureRect.new()
 			weapon_icon.texture = _item_icon(_weapon_icon_index(selected_weapon))
-			weapon_icon.custom_minimum_size = Vector2(92.0, 92.0)
+			weapon_icon.custom_minimum_size = Vector2(72.0, 72.0)
 			weapon_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			weapon_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			showcase.add_child(weapon_icon)
@@ -572,7 +642,7 @@ func _build_lobby_section() -> Control:
 			showcase.add_child(details)
 			var equipped_heading := Label.new()
 			equipped_heading.text = "장착 슬롯  ·  %s" % _weapon_name(selected_weapon)
-			equipped_heading.add_theme_font_size_override("font_size", 20)
+			equipped_heading.add_theme_font_size_override("font_size", 18)
 			details.add_child(equipped_heading)
 			var weapon_summary := Label.new()
 			weapon_summary.text = "%s 등급  ·  강화 +%d" % [RARITY_NAMES[int(equipped.get("rarity", 0))], int(equipped.get("enhancement", 0))]
@@ -581,12 +651,14 @@ func _build_lobby_section() -> Control:
 			weapon_description.text = _weapon_description(selected_weapon)
 			weapon_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			details.add_child(weapon_description)
-			for line in _potential_lines(equipped):
-				var potential_label := Label.new()
-				potential_label.text = "· " + line
-				details.add_child(potential_label)
+			var potential_label := Label.new()
+			potential_label.text = _potential_summary(equipped)
+			potential_label.add_theme_font_size_override("font_size", 14)
+			potential_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			details.add_child(potential_label)
 			var actions := HBoxContainer.new()
 			actions.add_theme_constant_override("separation", 5)
+			actions.custom_minimum_size.y = 38.0
 			body.add_child(actions)
 			var enhance := Button.new()
 			var enhance_cost := _enhancement_cost(equipped)
@@ -609,14 +681,13 @@ func _build_lobby_section() -> Control:
 			synthesize.text = "동일 무기 합성  ·  조각 %d" % shard_cost
 			synthesize.disabled = not can_synthesize or int(equipped.get("rarity", 0)) >= 4 or weapon_shards < shard_cost
 			synthesize.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			synthesize.pressed.connect(_synthesize_equipped_weapon)
+			synthesize.pressed.connect(_confirm_synthesize_equipped_weapon)
 			actions.add_child(synthesize)
 			var collection_heading := Label.new()
 			collection_heading.text = "무기 도감 및 보유 카피  ·  보유 %d개" % weapon_inventory.size()
-			collection_heading.add_theme_font_size_override("font_size", 17)
+			collection_heading.add_theme_font_size_override("font_size", 16)
 			body.add_child(collection_heading)
 			var collection_scroll := ScrollContainer.new()
-			collection_scroll.custom_minimum_size.y = 190.0
 			collection_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			collection_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 			body.add_child(collection_scroll)
@@ -632,11 +703,10 @@ func _build_lobby_section() -> Control:
 				for inventory_item in weapon_inventory:
 					if str(inventory_item.get("weapon_id", "")) == weapon_id:
 						copies.append(inventory_item)
-				var card := PanelContainer.new()
-				card.custom_minimum_size = Vector2(214.0, 110.0)
-				if copies.is_empty():
-					card.modulate = Color(0.58, 0.56, 0.52, 0.88)
-				weapon_grid.add_child(card)
+				var card_rarity := int(copies[0].get("rarity", 0)) if not copies.is_empty() else 0
+				var card_edges: Array[Color] = [Color("82796b"), Color("67916f"), Color("5485a5"), Color("936bb0"), Color("c49645")]
+				var card := _lobby_card(weapon_grid, Color("f7efdf") if not copies.is_empty() else Color("e5dfd4"), card_edges[card_rarity])
+				card.custom_minimum_size = Vector2(214.0, 72.0)
 				var card_body := VBoxContainer.new()
 				card_body.add_theme_constant_override("separation", 3)
 				card.add_child(card_body)
@@ -645,7 +715,7 @@ func _build_lobby_section() -> Control:
 				card_body.add_child(weapon_row)
 				var catalog_icon := TextureRect.new()
 				catalog_icon.texture = _item_icon(_weapon_icon_index(weapon_id))
-				catalog_icon.custom_minimum_size = Vector2(34.0, 34.0)
+				catalog_icon.custom_minimum_size = Vector2(28.0, 28.0)
 				catalog_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 				catalog_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 				weapon_row.add_child(catalog_icon)
@@ -663,33 +733,127 @@ func _build_lobby_section() -> Control:
 						var copy_button := Button.new()
 						var is_selected := copy_uid == selected_weapon_uid
 						copy_button.text = ("✓ 장착 중  ·  " if is_selected else "장착  ·  ") + "%s  +%d" % [RARITY_NAMES[clampi(int(copy.get("rarity", 0)), 0, 4)], int(copy.get("enhancement", 0))]
-						copy_button.custom_minimum_size.y = 34.0
+						copy_button.custom_minimum_size.y = 26.0
 						copy_button.pressed.connect(_equip_weapon_uid.bind(copy_uid))
 						card_body.add_child(copy_button)
 		"chest":
-			var heading := Label.new()
-			heading.text = "무기 뽑기  ·  5개 등급"
-			body.add_child(heading)
-			var details := Label.new()
-			details.text = "일반 60% · 고급 25% · 레어 10% · 유니크 4% · 전설 1%\n보유 무기 조각 %d  /  뽑기 비용 %d" % [weapon_shards, GACHA_COST]
-			body.add_child(details)
-			var button := Button.new()
-			button.text = "무기 뽑기  ·  조각 %d개" % GACHA_COST
-			button.icon = _item_icon(11)
-			button.add_theme_constant_override("icon_max_width", 34)
-			button.disabled = weapon_shards < GACHA_COST
-			button.pressed.connect(_draw_weapon)
-			body.add_child(button)
+			var chest_scroll := ScrollContainer.new()
+			chest_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			chest_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+			chest_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+			body.add_child(chest_scroll)
+			var chest_layout := VBoxContainer.new()
+			chest_layout.add_theme_constant_override("separation", 8)
+			chest_layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			chest_scroll.add_child(chest_layout)
+			var chest_heading := Label.new()
+			chest_heading.text = "무기 뽑기"
+			chest_heading.add_theme_font_size_override("font_size", 22)
+			chest_layout.add_child(chest_heading)
+			var resource_card := _lobby_card(chest_layout, Color("f7efdf"), Color("c7b58d"))
+			var resource_row := HBoxContainer.new()
+			resource_row.add_theme_constant_override("separation", 12)
+			resource_card.add_child(resource_row)
+			var shard_icon := TextureRect.new()
+			shard_icon.texture = _item_icon(11)
+			shard_icon.custom_minimum_size = Vector2(38.0, 38.0)
+			shard_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			shard_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			resource_row.add_child(shard_icon)
+			var resource_info := VBoxContainer.new()
+			resource_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			resource_row.add_child(resource_info)
+			var resource_title := Label.new()
+			resource_title.text = "무기 조각"
+			resource_title.add_theme_font_size_override("font_size", 16)
+			resource_info.add_child(resource_title)
+			var resource_hint := Label.new()
+			resource_hint.text = "뽑기 1회에 조각 %d개가 필요합니다" % GACHA_COST
+			resource_hint.add_theme_color_override("font_color", Color("786f61"))
+			resource_info.add_child(resource_hint)
+			var resource_count := Label.new()
+			resource_count.text = "%d개 보유" % weapon_shards
+			resource_count.add_theme_font_size_override("font_size", 19)
+			resource_row.add_child(resource_count)
+			var chance_heading := Label.new()
+			chance_heading.text = "등급별 획득 확률"
+			chance_heading.add_theme_font_size_override("font_size", 17)
+			chest_layout.add_child(chance_heading)
+			var chance_row := HBoxContainer.new()
+			chance_row.add_theme_constant_override("separation", 8)
+			chest_layout.add_child(chance_row)
+			var rarity_colors: Array[Color] = [Color("82796b"), Color("67916f"), Color("5485a5"), Color("936bb0"), Color("c49645")]
+			for index in RARITY_NAMES.size():
+				var chance_card := _lobby_card(chance_row, Color("f7efdf"), rarity_colors[index])
+				chance_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			chance_card.custom_minimum_size.y = 50.0
+				var chance_info := VBoxContainer.new()
+				chance_info.alignment = BoxContainer.ALIGNMENT_CENTER
+				chance_card.add_child(chance_info)
+				var rarity_label := Label.new()
+				rarity_label.text = RARITY_NAMES[index]
+				rarity_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				rarity_label.add_theme_color_override("font_color", rarity_colors[index])
+				chance_info.add_child(rarity_label)
+				var chance_label := Label.new()
+				chance_label.text = "%d%%" % RARITY_CHANCES[index]
+				chance_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				chance_info.add_child(chance_label)
+			var showcase_card := _lobby_card(chest_layout, Color("e4d8c2"), Color("c7b58d"))
+			showcase_card.custom_minimum_size.y = 108.0
+			var showcase_row := HBoxContainer.new()
+			showcase_row.alignment = BoxContainer.ALIGNMENT_CENTER
+			showcase_row.add_theme_constant_override("separation", 18)
+			showcase_card.add_child(showcase_row)
+			var preview_icon := TextureRect.new()
+			var preview_name := "무기 상자"
+			var preview_note := "뽑기를 누르면 무기가 공개됩니다"
+			if not last_weapon_draw.is_empty():
+				var preview_weapon_id := str(last_weapon_draw.get("weapon_id", "pencil_sword"))
+				preview_icon.texture = _item_icon(_weapon_icon_index(preview_weapon_id))
+				preview_name = "%s · %s 등급" % [_weapon_name(preview_weapon_id), RARITY_NAMES[int(last_weapon_draw.get("rarity", 0))]]
+				preview_note = "마지막으로 획득한 무기"
+			else:
+				preview_icon.texture = _item_icon(11)
+			preview_icon.custom_minimum_size = Vector2(92.0, 92.0)
+			preview_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			preview_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			showcase_row.add_child(preview_icon)
+			var preview_info := VBoxContainer.new()
+			preview_info.alignment = BoxContainer.ALIGNMENT_CENTER
+			showcase_row.add_child(preview_info)
+			var preview_title := Label.new()
+			preview_title.text = preview_name
+			preview_title.add_theme_font_size_override("font_size", 19)
+			preview_info.add_child(preview_title)
+			var preview_subtitle := Label.new()
+			preview_subtitle.text = preview_note
+			preview_subtitle.add_theme_color_override("font_color", Color("786f61"))
+			preview_info.add_child(preview_subtitle)
+			var draw_button := Button.new()
+			draw_button.text = "무기 뽑기  ·  조각 %d개" % GACHA_COST
+			draw_button.icon = _item_icon(11)
+			draw_button.add_theme_constant_override("icon_max_width", 34)
+			draw_button.custom_minimum_size = Vector2(320.0, 46.0)
+			draw_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			draw_button.disabled = weapon_shards < GACHA_COST
+			if weapon_shards < GACHA_COST:
+				draw_button.tooltip_text = "조각이 %d개 더 필요합니다" % (GACHA_COST - weapon_shards)
+			draw_button.pressed.connect(_draw_weapon)
+			body.add_child(draw_button)
 		"skills":
+			body.add_theme_constant_override("separation", 6)
 			var heading := Label.new()
 			heading.text = "보유 스킬 %d / %d  ·  마력 조각 %d" % [skills_owned.size(), SKILLS.size(), magic_shards]
 			body.add_child(heading)
 			var draw_skill := Button.new()
-			draw_skill.text = "스킬 뽑기  ·  마력 조각 %d개" % SKILL_GACHA_COST if skills_owned.size() < SKILLS.size() else "모든 스킬을 획득했습니다"
+			draw_skill.text = "스킬 뽑기  ·  마력 조각 %d개" % SKILL_GACHA_COST if skills_owned.size() < SKILLS.size() else "중복 뽑기 · 보유 스킬 강화  ·  마력 조각 %d개" % SKILL_GACHA_COST
 			draw_skill.icon = _skill_icon("magic_shard")
 			draw_skill.add_theme_constant_override("icon_max_width", 30)
-			draw_skill.disabled = skills_owned.size() >= SKILLS.size() or magic_shards < SKILL_GACHA_COST
+			draw_skill.disabled = magic_shards < SKILL_GACHA_COST or not _can_draw_skill()
 			draw_skill.pressed.connect(_draw_skill)
+			draw_skill.custom_minimum_size = Vector2(330.0, 44.0)
+			draw_skill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 			body.add_child(draw_skill)
 			var slot_picker := HBoxContainer.new()
 			slot_picker.add_theme_constant_override("separation", 8)
@@ -699,7 +863,7 @@ func _build_lobby_section() -> Control:
 				var slot_skill_id := equipped_skill_slots[index]
 				var slot_skill_name := _skill_name(slot_skill_id) if not slot_skill_id.is_empty() else "빈 슬롯"
 				slot_button.text = "%s  ·  %s" % [["Q", "W", "E", "R"][index], slot_skill_name]
-				slot_button.custom_minimum_size = Vector2(166.0, 58.0)
+				slot_button.custom_minimum_size = Vector2(166.0, 54.0)
 				slot_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				slot_button.add_theme_constant_override("icon_max_width", 30)
 				if not slot_skill_id.is_empty():
@@ -713,17 +877,17 @@ func _build_lobby_section() -> Control:
 				slot_picker.add_child(slot_button)
 			var slot_hint := Label.new()
 			var selected_key: String = ["Q", "W", "E", "R"][selected_skill_slot] if selected_skill_slot >= 0 else ""
-			slot_hint.text = "%s 슬롯 선택됨  ·  아래에서 보유 스킬의 장착 버튼을 누르세요." % selected_key if not selected_key.is_empty() else "먼저 장착할 슬롯을 선택하세요."
+			slot_hint.text = "%s 슬롯 선택" % selected_key if not selected_key.is_empty() else "장착할 슬롯을 선택하세요."
 			slot_hint.add_theme_color_override("font_color", Color("8b5947"))
+			slot_hint.add_theme_font_size_override("font_size", 14)
 			body.add_child(slot_hint)
 			var scroll := ScrollContainer.new()
-			scroll.custom_minimum_size.y = 205
 			scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 			body.add_child(scroll)
 			var skill_list := VBoxContainer.new()
 			skill_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			skill_list.add_theme_constant_override("separation", 6)
+			skill_list.add_theme_constant_override("separation", 4)
 			scroll.add_child(skill_list)
 			for skill in SKILLS:
 				var skill_id := str(skill.id)
@@ -732,13 +896,21 @@ func _build_lobby_section() -> Control:
 				var assignment_note := ""
 				if assigned_slot >= 0:
 					assignment_note = "  ·  %s 장착 중" % ["Q", "W", "E", "R"][assigned_slot]
+				var skill_edge := Color("bd9854") if assigned_slot >= 0 else Color("c8bba3")
+				var row_card := _lobby_card(skill_list, Color("f7efdf") if is_owned else Color("ebe4d8"), skill_edge)
+				row_card.custom_minimum_size.y = 56.0
+				var skill_row_style := _lobby_surface(Color("f7efdf") if is_owned else Color("ebe4d8"), skill_edge)
+				skill_row_style.content_margin_left = 8.0
+				skill_row_style.content_margin_right = 8.0
+				skill_row_style.content_margin_top = 6.0
+				skill_row_style.content_margin_bottom = 6.0
+				row_card.add_theme_stylebox_override("panel", skill_row_style)
 				var row := HBoxContainer.new()
-				row.custom_minimum_size.y = 66.0
 				row.add_theme_constant_override("separation", 10)
-				row.modulate = Color.WHITE if is_owned else Color(0.56, 0.55, 0.52, 0.82)
+				row_card.add_child(row)
 				var icon_view := TextureRect.new()
 				icon_view.texture = _skill_icon(skill_id)
-				icon_view.custom_minimum_size = Vector2(52.0, 52.0)
+				icon_view.custom_minimum_size = Vector2(40.0, 40.0)
 				icon_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 				icon_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 				row.add_child(icon_view)
@@ -746,7 +918,8 @@ func _build_lobby_section() -> Control:
 				skill_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				skill_info.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 				skill_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				skill_info.text = "%s  ·  %s%s%s\n%s" % [skill.name, skill.role, "  ·  보유" if is_owned else "  ·  미수집", assignment_note, skill.description]
+				var skill_level := int(skill_levels.get(skill_id, 1))
+				skill_info.text = "%s  ·  %s%s%s%s\n%s" % [skill.name, skill.role, "  ·  Lv.%d" % skill_level if is_owned else "", "  ·  보유" if is_owned else "  ·  미수집", assignment_note, _skill_description(skill, skill_level)]
 				row.add_child(skill_info)
 				var equip_button := Button.new()
 				if not is_owned:
@@ -757,20 +930,37 @@ func _build_lobby_section() -> Control:
 					equip_button.text = "이동"
 				else:
 					equip_button.text = "장착"
-				equip_button.custom_minimum_size = Vector2(88.0, 42.0)
+				equip_button.custom_minimum_size = Vector2(76.0, 34.0)
 				equip_button.disabled = not is_owned or selected_skill_slot < 0 or assigned_slot == selected_skill_slot
 				if is_owned and selected_skill_slot >= 0:
 					equip_button.pressed.connect(_equip_skill_to_slot.bind(skill_id, selected_skill_slot))
 				row.add_child(equip_button)
-				skill_list.add_child(row)
+				if is_owned:
+					var upgrade_button := Button.new()
+					var upgrade_cost := _skill_upgrade_cost(skill_level)
+					upgrade_button.text = "강화 %d" % upgrade_cost
+					upgrade_button.custom_minimum_size = Vector2(72, 34)
+					upgrade_button.disabled = skill_level >= MAX_ENHANCEMENT or magic_shards < upgrade_cost
+					upgrade_button.pressed.connect(_upgrade_skill.bind(skill_id))
+					row.add_child(upgrade_button)
 		"settings":
+			var settings_column := VBoxContainer.new()
+			settings_column.custom_minimum_size.x = 620.0
+			settings_column.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			settings_column.alignment = BoxContainer.ALIGNMENT_CENTER
+			settings_column.add_theme_constant_override("separation", 14)
+			body.add_child(settings_column)
 			var audio_heading := Label.new()
 			audio_heading.text = "소리"
-			audio_heading.add_theme_font_size_override("font_size", 18)
-			body.add_child(audio_heading)
+			audio_heading.add_theme_font_size_override("font_size", 20)
+			settings_column.add_child(audio_heading)
+			var audio_card := _lobby_card(settings_column, Color("f5ecdc"), Color("c5b69d"))
+			var audio_content := VBoxContainer.new()
+			audio_content.add_theme_constant_override("separation", 10)
+			audio_card.add_child(audio_content)
 			var volume_row := HBoxContainer.new()
-			volume_row.add_theme_constant_override("separation", 12)
-			body.add_child(volume_row)
+			volume_row.add_theme_constant_override("separation", 14)
+			audio_content.add_child(volume_row)
 			var volume_title := Label.new()
 			volume_title.text = "전체 음량"
 			volume_title.custom_minimum_size.x = 100.0
@@ -780,6 +970,7 @@ func _build_lobby_section() -> Control:
 			volume_slider.max_value = 100.0
 			volume_slider.step = 1.0
 			volume_slider.value = master_volume_percent
+			volume_slider.custom_minimum_size.x = 300.0
 			volume_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			volume_slider.value_changed.connect(_set_master_volume)
 			volume_row.add_child(volume_slider)
@@ -790,30 +981,54 @@ func _build_lobby_section() -> Control:
 			volume_row.add_child(settings_volume_label)
 			var display_heading := Label.new()
 			display_heading.text = "화면"
-			display_heading.add_theme_font_size_override("font_size", 18)
-			body.add_child(display_heading)
+			display_heading.add_theme_font_size_override("font_size", 20)
+			settings_column.add_child(display_heading)
+			var display_card := _lobby_card(settings_column, Color("f5ecdc"), Color("c5b69d"))
+			var display_row := HBoxContainer.new()
+			display_row.add_theme_constant_override("separation", 12)
+			display_card.add_child(display_row)
+			var display_info := VBoxContainer.new()
+			display_info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			display_row.add_child(display_info)
+			var display_title := Label.new()
+			display_title.text = "전체 화면"
+			display_title.add_theme_font_size_override("font_size", 17)
+			display_info.add_child(display_title)
+			var display_hint := Label.new()
+			display_hint.text = "게임 화면을 모니터에 맞춥니다"
+			display_hint.add_theme_color_override("font_color", Color("756f65"))
+			display_info.add_child(display_hint)
 			var fullscreen := CheckButton.new()
-			fullscreen.text = "전체화면 사용"
 			fullscreen.button_pressed = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
 			fullscreen.toggled.connect(_set_fullscreen)
-			body.add_child(fullscreen)
+			display_row.add_child(fullscreen)
+			var settings_actions := HBoxContainer.new()
+			settings_actions.alignment = BoxContainer.ALIGNMENT_END
+			settings_actions.add_theme_constant_override("separation", 12)
+			settings_column.add_child(settings_actions)
 			var help_button := Button.new()
-			help_button.text = "도움말 보기"
-			help_button.custom_minimum_size.y = 42.0
+			help_button.text = "도움말"
+			help_button.custom_minimum_size = Vector2(170.0, 48.0)
 			help_button.pressed.connect(func(): _open_lobby_window("help"))
-			body.add_child(help_button)
+			settings_actions.add_child(help_button)
 			var exit_button := Button.new()
 			exit_button.text = "게임 종료"
-			exit_button.custom_minimum_size.y = 42.0
+			exit_button.custom_minimum_size = Vector2(170.0, 48.0)
+			var danger_style := _flat_style(Color("a34842"))
+			danger_style.set_border_width_all(1)
+			danger_style.border_color = Color("7c322e")
+			exit_button.add_theme_stylebox_override("normal", danger_style)
+			exit_button.add_theme_stylebox_override("hover", _flat_style(Color("bd5a50")))
+			exit_button.add_theme_color_override("font_color", Color("fff3e5"))
 			exit_button.pressed.connect(_confirm_exit_game)
-			body.add_child(exit_button)
+			settings_actions.add_child(exit_button)
 		"help":
 			var controls := Label.new()
 			controls.text = "조작 방법"
 			controls.add_theme_font_size_override("font_size", 19)
 			body.add_child(controls)
 			var help_text := Label.new()
-			help_text.text = "이동  ·  WASD 또는 방향키\n대시  ·  Space\n공격  ·  자동 공격\n스킬 슬롯  ·  Q / W / E / R (현재는 장착 및 슬롯 표시만 지원)\n일시 정지  ·  Esc\n\n스테이지를 클리어하거나 적을 처치해 골드와 조각을 모으세요. 로비에서 무기를 강화하고, 스킬을 뽑아 슬롯에 장착할 수 있습니다."
+		help_text.text = "이동  ·  WASD 또는 방향키\n대시  ·  Space\n공격  ·  자동 공격\n스킬 슬롯  ·  Q / W / E / R\n일시 정지  ·  Esc\n\n스테이지의 적을 모두 처치하면 클리어합니다. 보스 스테이지에서는 일반 적을 정리한 뒤 보스까지 처치하세요. 골드와 조각을 모아 무기와 스킬을 성장시킬 수 있습니다."
 			help_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			help_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			body.add_child(help_text)
@@ -862,6 +1077,88 @@ func _skill_name(skill_id: String) -> String:
 	return "미장착"
 
 
+func _skill_data(skill_id: String) -> Dictionary:
+	for skill in SKILLS:
+		if str(skill.id) == skill_id:
+			return skill
+	return {}
+
+
+func _skill_upgrade_cost(level: int) -> int:
+	return 3 + maxi(0, level - 1) * 2
+
+
+func _can_draw_skill() -> bool:
+	if skills_owned.size() < SKILLS.size():
+		return true
+	for skill_id in skills_owned:
+		if int(skill_levels.get(skill_id, 1)) < MAX_ENHANCEMENT:
+			return true
+	return false
+
+
+func _skill_description(skill: Dictionary, level: int) -> String:
+	var strength := 1.0 + float(maxi(0, level - 1)) * 0.15
+	var cooldown := maxf(5.0, float(skill.get("cooldown", 10.0)) * (1.0 - float(level - 1) * 0.025))
+	match str(skill.get("id", "")):
+		"ink_wave": return "반경 %d 안에 공격력 %.0f%% 피해. 쿨다운 %.0f초." % [int(skill.radius), float(skill.damage_ratio) * strength * 100.0, cooldown]
+		"compass_pierce": return "가장 가까운 적 하나에 공격력 %.0f%% 피해. 쿨다운 %.0f초." % [float(skill.damage_ratio) * strength * 100.0, cooldown]
+		"lifeline": return "최대 체력의 %.0f%% 회복. 쿨다운 %.0f초." % [minf(0.75, float(skill.heal_ratio) * strength) * 100.0, cooldown]
+		"final_ink": return "1초 집중 후 공격력 %.0f%% 피해. 쿨다운 %.0f초." % [float(skill.damage_ratio) * strength * 100.0, cooldown]
+	return str(skill.get("description", ""))
+
+
+func _upgrade_skill(skill_id: String) -> void:
+	var level := int(skill_levels.get(skill_id, 1))
+	var cost := _skill_upgrade_cost(level)
+	if not skills_owned.has(skill_id) or level >= MAX_ENHANCEMENT or magic_shards < cost:
+		return
+	magic_shards -= cost
+	skill_levels[skill_id] = level + 1
+	last_lobby_message = "%s 스킬이 Lv.%d로 강화됐습니다." % [_skill_name(skill_id), level + 1]
+	_save_progress()
+	_refresh_lobby_window()
+
+
+func _use_skill(slot_index: int) -> void:
+	if slot_index < 0 or slot_index >= equipped_skill_slots.size():
+		return
+	var skill_id := equipped_skill_slots[slot_index]
+	if skill_id.is_empty() or not skills_owned.has(skill_id) or float(skill_cooldowns.get(skill_id, 0.0)) > 0.0:
+		return
+	var skill := _skill_data(skill_id)
+	if skill.is_empty():
+		return
+	var level := int(skill_levels.get(skill_id, 1))
+	var strength := 1.0 + float(level - 1) * 0.15
+	var cooldown := maxf(5.0, float(skill.cooldown) * (1.0 - float(level - 1) * 0.025))
+	skill_cooldowns[skill_id] = cooldown
+	match skill_id:
+		"ink_wave":
+			for enemy in enemies.duplicate():
+				if enemy.position.distance_to(player_position) <= float(skill.radius):
+					_damage_enemy(enemy, player_damage * float(skill.damage_ratio) * strength)
+			if not boss.is_empty() and boss.position.distance_to(player_position) <= float(skill.radius):
+				_damage_boss(player_damage * float(skill.damage_ratio) * strength)
+			_burst(player_position, Color("6bd2ca"), 28)
+		"compass_pierce", "final_ink":
+			var target := _nearest_target(1000.0)
+			if target.is_empty():
+				skill_cooldowns[skill_id] = 0.0
+				last_lobby_message = "사거리 안에 공격할 적이 없습니다."
+				return
+			if skill_id == "final_ink":
+				await get_tree().create_timer(float(skill.get("charge_time", 1.0))).timeout
+				if mode != "playing": return
+			_damage_target(target, player_damage * float(skill.damage_ratio) * strength)
+			_burst(target.position, Color("e3b761") if skill_id == "final_ink" else Color("c3a66d"), 20)
+		"lifeline":
+			var healed := player_max_hp * minf(0.75, float(skill.heal_ratio) * strength)
+			player_hp = minf(player_max_hp, player_hp + healed)
+			_burst(player_position, Color("8bd68a"), 18)
+	_update_hud()
+
+
 func _update_skill_hud() -> void:
 	if skill_slot_icons.size() != 4:
 		return
@@ -869,7 +1166,9 @@ func _update_skill_hud() -> void:
 		var skill_id := equipped_skill_slots[index]
 		var has_skill := not skill_id.is_empty() and skills_owned.has(skill_id)
 		skill_slot_icons[index].texture = _skill_icon(skill_id) if has_skill else null
-		skill_slot_labels[index].text = _skill_name(skill_id) if has_skill else "빈 슬롯"
+		var cooldown := float(skill_cooldowns.get(skill_id, 0.0)) if has_skill else 0.0
+		var skill_level := int(skill_levels.get(skill_id, 1)) if has_skill else 0
+		skill_slot_labels[index].text = ("Lv.%d · %.0fs" % [skill_level, cooldown] if cooldown > 0.0 else "Lv.%d · 사용" % skill_level) if has_skill else "빈 슬롯"
 
 
 func _equip_skill_to_slot(skill_id: String, slot_index: int) -> void:
@@ -1006,6 +1305,7 @@ func _draw_weapon() -> void:
 			break
 	var weapon_id: String = str(WEAPONS[rng.randi_range(0, WEAPONS.size() - 1)].id)
 	var obtained := _make_weapon_record(weapon_id, rarity)
+	last_weapon_draw = obtained.duplicate(true)
 	weapon_inventory.append(obtained)
 	selected_weapon_uid = int(obtained.uid)
 	selected_weapon = weapon_id
@@ -1020,17 +1320,29 @@ func _draw_weapon() -> void:
 
 
 func _draw_skill() -> void:
-	if magic_shards < SKILL_GACHA_COST or skills_owned.size() >= SKILLS.size():
+	if magic_shards < SKILL_GACHA_COST:
 		return
 	var unowned: Array[Dictionary] = []
 	for skill in SKILLS:
 		if not skills_owned.has(str(skill.id)):
 			unowned.append(skill)
-	if unowned.is_empty():
-		return
-	var result: Dictionary = unowned[rng.randi_range(0, unowned.size() - 1)]
+	var result: Dictionary
 	magic_shards -= SKILL_GACHA_COST
-	skills_owned.append(str(result.id))
+	if not unowned.is_empty():
+		result = unowned[rng.randi_range(0, unowned.size() - 1)]
+		skills_owned.append(str(result.id))
+		skill_levels[str(result.id)] = 1
+	else:
+		var upgradeable: Array[String] = []
+		for skill_id in skills_owned:
+			if int(skill_levels.get(skill_id, 1)) < MAX_ENHANCEMENT:
+				upgradeable.append(skill_id)
+		if upgradeable.is_empty():
+			magic_shards += SKILL_GACHA_COST
+			return
+		var owned_skill_id := upgradeable[rng.randi_range(0, upgradeable.size() - 1)]
+		result = _skill_data(owned_skill_id)
+		skill_levels[owned_skill_id] = int(skill_levels.get(owned_skill_id, 1)) + 1
 	last_lobby_message = "새 스킬 획득: %s · 스킬 탭에서 QWER 슬롯에 장착할 수 있습니다." % result.name
 	_save_progress()
 	var previews: Array[Dictionary] = []
@@ -1147,6 +1459,23 @@ func _synthesize_equipped_weapon() -> void:
 	_update_lobby()
 
 
+func _confirm_synthesize_equipped_weapon() -> void:
+	if not _can_synthesize_equipped():
+		return
+	var equipped := _equipped_item()
+	var rarity := int(equipped.get("rarity", 0))
+	var cost := rarity + 1
+	if rarity >= RARITY_NAMES.size() - 1 or weapon_shards < cost:
+		return
+	var weapon_name := _weapon_name(str(equipped.get("weapon_id", selected_weapon)))
+	var confirmed: bool = await reward_presentation.confirm_weapon_synthesis(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, RARITY_NAMES[rarity + 1], cost)
+	if not confirmed:
+		return
+	_synthesize_equipped_weapon()
+	var result := _equipped_item()
+	await reward_presentation.play_synthesis_result(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, RARITY_NAMES[int(result.get("rarity", rarity + 1))])
+
+
 func _remove_weapon_uid(uid: int) -> void:
 	for index in range(weapon_inventory.size() - 1, -1, -1):
 		if int(weapon_inventory[index].get("uid", -1)) == uid:
@@ -1173,9 +1502,12 @@ func start_run() -> void:
 
 func _reset_run() -> void:
 	elapsed = 0.0
+	skill_cooldowns.clear()
 	kills = 0
 	spawn_timer = 0.0
-	elite_at = 35.0
+	stage_enemy_quota = int(STAGE_ENEMY_COUNTS[STAGE_IDS[stage_index]])
+	stage_enemies_spawned = 0
+	stage_boss_spawned = false
 	attack_timer = 0.0
 	dash_timer = 0.0
 	dash_cooldown = 0.0
@@ -1218,6 +1550,13 @@ func _load_progress() -> void:
 				for skill in SKILLS:
 					if str(skill.id) == str(skill_id) and not skills_owned.has(str(skill_id)):
 						skills_owned.append(str(skill_id))
+		var stored_skill_levels: Variant = saved_progress.get("skill_levels", {})
+		if stored_skill_levels is Dictionary:
+			for skill_id in skills_owned:
+				skill_levels[skill_id] = clampi(int(stored_skill_levels.get(skill_id, 1)), 1, MAX_ENHANCEMENT)
+		else:
+			for skill_id in skills_owned:
+				skill_levels[skill_id] = 1
 		var stored_slots: Variant = saved_progress.get("equipped_skill_slots", ["", "", "", ""])
 		if stored_slots is Array:
 			for index in mini(4, stored_slots.size()):
@@ -1272,6 +1611,7 @@ func _save_progress() -> void:
 		"weapon_shards":weapon_shards,
 		"magic_shards":magic_shards,
 		"skills_owned":skills_owned,
+		"skill_levels":skill_levels,
 		"equipped_skill_slots":equipped_skill_slots,
 		"weapon_inventory":weapon_inventory,
 		"selected_weapon":selected_weapon,
@@ -1305,6 +1645,8 @@ func show_pause() -> void:
 func _update_game(delta: float) -> void:
 	elapsed += delta
 	attack_timer -= delta
+	for skill_id in skill_cooldowns.keys():
+		skill_cooldowns[skill_id] = maxf(0.0, float(skill_cooldowns[skill_id]) - delta)
 	dash_timer = maxf(0.0, dash_timer - delta)
 	dash_cooldown = maxf(0.0, dash_cooldown - delta)
 	invulnerability = maxf(0.0, invulnerability - delta)
@@ -1328,51 +1670,44 @@ func _update_game(delta: float) -> void:
 	_update_particles(delta)
 	if not boss.is_empty():
 		_update_boss(delta)
-	var stage_id: String = STAGE_IDS[stage_index]
-	if mode == "playing" and not BOSS_STAGES.has(stage_id) and elapsed >= float(STAGE_LENGTHS[stage_id]):
-		finish(true)
 	_update_hud()
 
 
 func _spawn_enemies(delta: float) -> void:
 	var stage_id: String = STAGE_IDS[stage_index]
-	if elapsed < float(STAGE_LENGTHS[stage_id]):
+	if stage_enemies_spawned < stage_enemy_quota:
 		spawn_timer -= delta
 		if spawn_timer <= 0.0:
-			var amount := 2 if elapsed > 24.0 and rng.randf() < minf(0.68, 0.32 + elapsed / 260.0) else 1
-			for index in amount:
-				var roll := rng.randf()
-				var kind := "chaser"
+			var roll := rng.randf()
+			var kind := "chaser"
+			var wave_progress := float(stage_enemies_spawned) / float(stage_enemy_quota)
+			if stage_enemies_spawned > 0 and stage_enemies_spawned % 12 == 0:
+				kind = "elite"
+			else:
 				match stage_id:
 					"1-2":
-						if elapsed > 30.0 and roll < 0.32:
-							kind = "thrower"
+						if wave_progress > 0.35 and roll < 0.32: kind = "thrower"
 					"1-3":
-						if elapsed > 25.0 and roll < 0.38:
-							kind = "charger"
-						elif elapsed > 80.0 and roll > 0.82:
-							kind = "thrower"
+						if roll < 0.38: kind = "charger"
+						elif roll > 0.82: kind = "thrower"
 					"1-4":
-						if roll < 0.28:
-							kind = "thrower"
-						elif roll < 0.62:
-							kind = "charger"
+						if roll < 0.28: kind = "thrower"
+						elif roll < 0.62: kind = "charger"
 					"1-5":
-						if roll < 0.38:
-							kind = "charger"
+						if roll < 0.38: kind = "charger"
 					"2-1":
-						if roll < 0.27:
-							kind = "thrower"
-						elif roll < 0.58:
-							kind = "charger"
-				_spawn_enemy(kind)
-			spawn_timer = maxf(0.34, 0.72 - elapsed / 240.0)
-		if elapsed >= elite_at:
-			_spawn_enemy("elite")
-			elite_at += 42.0
-	if BOSS_STAGES.has(stage_id) and elapsed >= float(STAGE_LENGTHS[stage_id]) and boss.is_empty():
+						if roll < 0.27: kind = "thrower"
+						elif roll < 0.58: kind = "charger"
+			_spawn_enemy(kind)
+			stage_enemies_spawned += 1
+			spawn_timer = 0.82
+		return
+	if BOSS_STAGES.has(stage_id) and not stage_boss_spawned and enemies.is_empty():
+		stage_boss_spawned = true
 		boss = {"position":Vector2(W/2.0, 90.0), "hp":1200.0, "max_hp":1200.0, "radius":35.0, "attack":2.2, "warning":0.0, "phase":0, "aim_y":0.0}
 		boss_bar.show()
+	elif not BOSS_STAGES.has(stage_id) and enemies.is_empty():
+		finish(true)
 
 
 func _movement_input() -> Vector2:
@@ -1395,12 +1730,11 @@ func _spawn_enemy(kind: String) -> void:
 	position.x = clampf(position.x, 22.0, W - 22.0)
 	position.y = clampf(position.y, 22.0, H - 22.0)
 	var data: Dictionary = ENEMY_DATA[kind].duplicate(true)
-	var scale := 1.0 + minf(0.8, elapsed / 500.0)
+	var scale := 1.0 + float(stage_index) * 0.08
 	data["kind"] = kind
 	data["position"] = position
 	data["hp"] *= scale
 	data["max_hp"] = data["hp"]
-	data["speed"] += elapsed * 0.035 if kind == "chaser" else 0.0
 	data["attack"] = rng.randf_range(1.0, 2.0)
 	data["windup"] = 0.0
 	data["charge"] = 0.0
@@ -1719,6 +2053,7 @@ func _damage_boss(amount: float) -> void:
 	_burst(boss.position, Color("d65a46"), 8)
 	if boss.hp <= 0.0:
 		boss.clear()
+		kills += 1
 		finish(true)
 
 
@@ -1772,7 +2107,10 @@ func _format_time(seconds: float) -> String:
 
 
 func _update_hud() -> void:
-	hud_label.text = "%s · %s +%d\n체력 %.0f / %.0f\n골드 %d · 무기 %d · 마력 %d\n처치 %d · %s" % [STAGE_IDS[stage_index], _weapon_name(selected_weapon), int(_equipped_item().get("enhancement", 0)), player_hp, player_max_hp, gold, weapon_shards, magic_shards, kills, _format_time(elapsed)]
+	var target_count := stage_enemy_quota + (1 if stage_boss_spawned else 0)
+	var remaining_count := maxi(0, target_count - kills)
+	var objective := "보스 처치" if stage_boss_spawned else "남은 적 %d" % remaining_count
+	hud_label.text = "%s · %s +%d\n체력 %.0f / %.0f\n골드 %d · 무기 %d · 마력 %d\n처치 %d / %d  ·  %s\n경과 %s" % [STAGE_IDS[stage_index], _weapon_name(selected_weapon), int(_equipped_item().get("enhancement", 0)), player_hp, player_max_hp, gold, weapon_shards, magic_shards, kills, target_count, objective, _format_time(elapsed)]
 	hp_bar.max_value = player_max_hp
 	hp_bar.value = player_hp
 	_update_skill_hud()

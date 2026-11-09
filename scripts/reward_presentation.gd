@@ -24,9 +24,28 @@ var cube_stop_button: Button
 
 func _ready() -> void:
 	rng.randomize()
+	var presentation_theme := Theme.new()
+	presentation_theme.set_color("font_color", "Label", Color("f2e8d4"))
+	presentation_theme.set_color("font_color", "Button", Color("f2e8d4"))
+	presentation_theme.set_color("font_hover_color", "Button", Color("ffffff"))
+	presentation_theme.set_color("font_pressed_color", "Button", Color("e3bd72"))
+	presentation_theme.set_color("font_disabled_color", "Button", Color("8f918e"))
+	var button_style := _flat_style(Color("344650"))
+	button_style.set_border_width_all(1)
+	button_style.border_color = Color("65767a")
+	var button_hover := _flat_style(Color("405861"))
+	button_hover.set_border_width_all(1)
+	button_hover.border_color = Color("d2ad67")
+	var button_pressed := _flat_style(Color("26363e"))
+	button_pressed.set_border_width_all(1)
+	button_pressed.border_color = Color("d2ad67")
+	presentation_theme.set_stylebox("normal", "Button", button_style)
+	presentation_theme.set_stylebox("hover", "Button", button_hover)
+	presentation_theme.set_stylebox("pressed", "Button", button_pressed)
 	shade = ColorRect.new()
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.color = Color(0.04, 0.035, 0.07, 0.88)
+	shade.theme = presentation_theme
 	add_child(shade)
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -41,7 +60,17 @@ func _flat_style(color: Color) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = color
 	style.set_corner_radius_all(8)
+	style.content_margin_left = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_top = 8.0
+	style.content_margin_bottom = 8.0
 	return style
+
+
+func _fit_panel(preferred_size: Vector2) -> void:
+	var viewport_size := get_viewport().get_visible_rect().size
+	var safe_size := viewport_size - Vector2(40.0, 40.0)
+	panel.custom_minimum_size = Vector2(minf(preferred_size.x, safe_size.x), minf(preferred_size.y, safe_size.y))
 
 
 func _begin(title: String, subtitle: String, accent: Color) -> VBoxContainer:
@@ -51,27 +80,38 @@ func _begin(title: String, subtitle: String, accent: Color) -> VBoxContainer:
 	_set_accent(accent)
 	var content := VBoxContainer.new()
 	content.alignment = BoxContainer.ALIGNMENT_CENTER
-	content.add_theme_constant_override("separation", 12)
+	content.add_theme_constant_override("separation", 7)
 	panel.add_child(content)
 	var heading := Label.new()
 	heading.text = title
 	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	heading.add_theme_font_size_override("font_size", 25)
+	heading.add_theme_color_override("font_color", Color("f4e8cf"))
 	content.add_child(heading)
+	var divider := HSeparator.new()
+	content.add_child(divider)
 	var message := Label.new()
 	message.text = subtitle
 	message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	message.add_theme_color_override("font_color", Color("bdc2bd"))
 	content.add_child(message)
 	shade.show()
 	return content
 
 
 func _set_accent(accent: Color) -> void:
-	panel.add_theme_stylebox_override("panel", _flat_style(Color("f2e6cf")))
+	var panel_style := _flat_style(Color("293940"))
+	panel_style.set_corner_radius_all(14)
+	panel_style.set_border_width_all(4)
+	panel_style.border_color = Color("43555b")
+	panel_style.content_margin_left = 16.0
+	panel_style.content_margin_right = 16.0
+	panel_style.content_margin_top = 14.0
+	panel_style.content_margin_bottom = 14.0
+	panel.add_theme_stylebox_override("panel", panel_style)
 	var style := panel.get_theme_stylebox("panel") as StyleBoxFlat
-	style.set_border_width_all(4)
-	style.border_color = accent
+	style.border_color = accent.lerp(Color("d9c7a3"), 0.28)
 
 
 func _add_icon(parent: Control, texture: Texture2D, size: Vector2 = Vector2(112.0, 112.0)) -> TextureRect:
@@ -83,6 +123,18 @@ func _add_icon(parent: Control, texture: Texture2D, size: Vector2 = Vector2(112.
 	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	parent.add_child(icon)
 	return icon
+
+
+func _add_relic_plate(parent: Control, texture: Texture2D, size: Vector2, accent: Color) -> TextureRect:
+	var plate := PanelContainer.new()
+	plate.custom_minimum_size = size + Vector2(18.0, 18.0)
+	var plate_style := _flat_style(Color("1e2a30"))
+	plate_style.set_border_width_all(2)
+	plate_style.border_color = accent
+	plate_style.set_corner_radius_all(12)
+	plate.add_theme_stylebox_override("panel", plate_style)
+	parent.add_child(plate)
+	return _add_icon(plate, texture, size)
 
 
 func _add_close_button(parent: Control) -> void:
@@ -97,6 +149,7 @@ func _add_close_button(parent: Control) -> void:
 
 
 func confirm_potential_reset(current_lines: String, cost: int, weapon_icon: Texture2D) -> bool:
+	_fit_panel(Vector2(500.0, 390.0))
 	var content := _begin("잠재능력 재설정", "현재 세 줄이 모두 사라지고 새 능력으로 교체됩니다.\n비용: 골드 %d" % cost, Color("8b73bd"))
 	_add_icon(content, weapon_icon, Vector2(76.0, 76.0))
 	var current := Label.new()
@@ -165,16 +218,17 @@ func animate_potential_roll(weapon_icon: Texture2D, preview_lines: Array[String]
 
 
 func open_enhancement_window(weapon_icon: Texture2D, weapon_name: String, level: int, cost: int, gold: int) -> void:
-	panel.custom_minimum_size = Vector2(560.0, 410.0)
+	_fit_panel(Vector2(560.0, 500.0))
 	var content := _begin("무기 강화", "STAR FORCE  ·  별을 쌓아 무기를 성장시킵니다", Color("d99a48"))
 	var icon_row := HBoxContainer.new()
 	icon_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	content.add_child(icon_row)
-	enhancement_icon = _add_icon(icon_row, weapon_icon, Vector2(104.0, 104.0))
+	enhancement_icon = _add_relic_plate(icon_row, weapon_icon, Vector2(88.0, 88.0), Color("d99a48"))
 	var name_label := Label.new()
 	name_label.text = weapon_name
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.add_theme_font_size_override("font_size", 19)
+	name_label.add_theme_color_override("font_color", Color("f0d39b"))
 	content.add_child(name_label)
 	enhancement_status = Label.new()
 	enhancement_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -189,7 +243,8 @@ func open_enhancement_window(weapon_icon: Texture2D, weapon_name: String, level:
 	enhancement_progress.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	enhancement_progress.max_value = 20.0
 	enhancement_progress.show_percentage = false
-	enhancement_progress.add_theme_stylebox_override("fill", _flat_style(Color("d99a48")))
+	enhancement_progress.add_theme_stylebox_override("fill", _flat_style(Color("e2b653")))
+	enhancement_progress.add_theme_stylebox_override("background", _flat_style(Color("19262d")))
 	content.add_child(enhancement_progress)
 	enhancement_summary = Label.new()
 	enhancement_summary.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -247,22 +302,97 @@ func _enhancement_set_busy(busy: bool) -> void:
 		enhancement_close_button.disabled = busy
 
 
+func confirm_weapon_synthesis(weapon_icon: Texture2D, weapon_name: String, rarity_name: String, shard_cost: int) -> bool:
+	_fit_panel(Vector2(580.0, 440.0))
+	var content := _begin("동일 무기 합성", "재료 두 개와 조각을 사용해 다음 등급 무기를 만듭니다.", Color("d7aa56"))
+	var material_row := HBoxContainer.new()
+	material_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	material_row.add_theme_constant_override("separation", 18)
+	content.add_child(material_row)
+	_add_relic_plate(material_row, weapon_icon, Vector2(84.0, 84.0), Color("c48e4d"))
+	var plus := Label.new()
+	plus.text = "+"
+	plus.add_theme_font_size_override("font_size", 30)
+	plus.add_theme_color_override("font_color", Color("e4bb71"))
+	material_row.add_child(plus)
+	_add_relic_plate(material_row, weapon_icon, Vector2(84.0, 84.0), Color("c48e4d"))
+	var arrow := Label.new()
+	arrow.text = "→"
+	arrow.add_theme_font_size_override("font_size", 28)
+	arrow.add_theme_color_override("font_color", Color("e4bb71"))
+	material_row.add_child(arrow)
+	var result_card := PanelContainer.new()
+	result_card.custom_minimum_size = Vector2(116.0, 116.0)
+	var result_style := _flat_style(Color("3c4949"))
+	result_style.set_border_width_all(2)
+	result_style.border_color = Color("e2bc69")
+	result_card.add_theme_stylebox_override("panel", result_style)
+	material_row.add_child(result_card)
+	_add_icon(result_card, weapon_icon, Vector2(88.0, 88.0))
+	var result_label := Label.new()
+	result_label.text = "%s 등급 · %s" % [rarity_name, weapon_name]
+	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_label.add_theme_font_size_override("font_size", 18)
+	content.add_child(result_label)
+	var cost_card := PanelContainer.new()
+	cost_card.add_theme_stylebox_override("panel", _flat_style(Color("36474d")))
+	var cost_label := Label.new()
+	cost_label.text = "사용 재료   ·   동일 무기 2개   +   무기 조각 %d개" % shard_cost
+	cost_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cost_label.add_theme_color_override("font_color", Color("e9d49d"))
+	cost_card.add_child(cost_label)
+	content.add_child(cost_card)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 10)
+	content.add_child(actions)
+	for option in [{"text":"합성하기", "value":true}, {"text":"취소", "value":false}]:
+		var button := Button.new()
+		button.text = str(option.text)
+		button.custom_minimum_size.y = 52.0
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.pressed.connect(_emit_decision.bind(bool(option.value)))
+		actions.add_child(button)
+	var confirmed: bool = await decision_made
+	shade.hide()
+	return confirmed
+
+
+func play_synthesis_result(weapon_icon: Texture2D, weapon_name: String, rarity_name: String) -> void:
+	_fit_panel(Vector2(500.0, 390.0))
+	var content := _begin("합성 성공", "두 무기의 힘이 하나로 모였습니다.", Color("e2bc69"))
+	var icon := _add_relic_plate(content, weapon_icon, Vector2(120.0, 120.0), Color("e2bc69"))
+	var result := Label.new()
+	result.text = "%s  ·  %s 등급" % [weapon_name, rarity_name]
+	result.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result.add_theme_font_size_override("font_size", 22)
+	result.add_theme_color_override("font_color", Color("f1d58e"))
+	content.add_child(result)
+	var tween := create_tween()
+	icon.scale = Vector2(0.35, 0.35)
+	tween.tween_property(icon, "scale", Vector2.ONE, 0.48).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_add_close_button(content)
+
+
 func open_potential_cube_window(weapon_icon: Texture2D, weapon_name: String, lines: Array[String], cost: int, gold: int) -> void:
-	panel.custom_minimum_size = Vector2(560.0, 440.0)
+	_fit_panel(Vector2(560.0, 500.0))
 	var content := _begin("잠재능력 큐브", "%s  ·  한 번 사용할 때마다 골드가 소모됩니다" % weapon_name, Color("8b73bd"))
 	cube_line_labels.clear()
-	_add_icon(content, weapon_icon, Vector2(72.0, 72.0))
+	_add_relic_plate(content, weapon_icon, Vector2(60.0, 60.0), Color("a892d0"))
 	var line_stack := VBoxContainer.new()
-	line_stack.add_theme_constant_override("separation", 8)
+	line_stack.add_theme_constant_override("separation", 6)
 	content.add_child(line_stack)
 	for index in 3:
 		var line_panel := PanelContainer.new()
-		line_panel.custom_minimum_size = Vector2(430.0, 48.0)
-		line_panel.add_theme_stylebox_override("panel", _flat_style(Color("e8dcc7")))
+		line_panel.custom_minimum_size = Vector2(minf(430.0, panel.custom_minimum_size.x - 72.0), 36.0)
+		var line_style := _flat_style(Color("e9ddc5"))
+		line_style.set_border_width_all(1)
+		line_style.border_color = Color("74628c")
+		line_panel.add_theme_stylebox_override("panel", line_style)
 		line_stack.add_child(line_panel)
 		var line_label := Label.new()
 		line_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		line_label.add_theme_font_size_override("font_size", 17)
+		line_label.add_theme_font_size_override("font_size", 15)
+		line_label.add_theme_color_override("font_color", Color("332c34"))
 		line_panel.add_child(line_label)
 		cube_line_labels.append(line_label)
 	cube_status = Label.new()
@@ -276,13 +406,13 @@ func open_potential_cube_window(weapon_icon: Texture2D, weapon_name: String, lin
 	content.add_child(actions)
 	cube_roll_button = Button.new()
 	cube_roll_button.text = "큐브 사용"
-	cube_roll_button.custom_minimum_size.y = 48.0
+	cube_roll_button.custom_minimum_size.y = 44.0
 	cube_roll_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cube_roll_button.pressed.connect(func(): weapon_window_action.emit("roll"))
 	actions.add_child(cube_roll_button)
 	cube_stop_button = Button.new()
 	cube_stop_button.text = "그만하기"
-	cube_stop_button.custom_minimum_size.y = 48.0
+	cube_stop_button.custom_minimum_size.y = 44.0
 	cube_stop_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cube_stop_button.pressed.connect(_stop_cube_window)
 	actions.add_child(cube_stop_button)
