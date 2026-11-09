@@ -10,6 +10,8 @@ const GACHA_COST := 5
 const SKILL_GACHA_COST := 3
 const MAGIC_SHARD_DROP_CHANCE := 0.04
 const MAX_ENHANCEMENT := 20
+const DASH_SKILL_ID := "dash_impact"
+const DASH_COOLDOWN_DURATION := 2.5
 const RARITY_NAMES := ["일반", "고급", "레어", "유니크", "전설"]
 const RARITY_DAMAGE := [1.0, 1.1, 1.22, 1.38, 1.58]
 const RARITY_CHANCES := [60, 25, 10, 4, 1]
@@ -18,20 +20,22 @@ const REWARD_PRESENTATION_SCENE: PackedScene = preload("res://scenes/reward_pres
 const CHARACTER_ATLAS: Texture2D = preload("res://art/stickman_characters_atlas.png")
 const ITEM_ATLAS: Texture2D = preload("res://art/weapon_items_atlas.png")
 const MAGIC_SKILL_ATLAS: Texture2D = preload("res://art/magic_skill_icons.png")
+const ACTION_ATLAS: Texture2D = preload("res://art/stickman_action_animation_atlas.png")
 const CHARACTER_CELL := 512.0
 const ITEM_CELL := 362.0
 const MAGIC_SKILL_CELL := Vector2(2172.0 / 5.0, 434.0)
 const MAGIC_SKILL_REGION_Y := 145.0
+const ACTION_FRAME_SIZE := Vector2(362.0, 271.5)
 const WEAPONS := [
-	{"id":"pencil_sword", "name":"연필검", "desc":"가까운 적을 빠르게 베는 기본 무기."},
-	{"id":"ink_orb", "name":"먹물 구슬", "desc":"가까운 적을 향해 먹물 구슬을 발사합니다."},
-	{"id":"orbit_line", "name":"회전 선분", "desc":"주변을 도는 선분이 가까운 적을 칩니다."},
-	{"id":"ruler_spear", "name":"자 대검", "desc":"긴 직선으로 일렬의 적을 관통합니다."},
-	{"id":"brush_burst", "name":"붓 폭발탄", "desc":"세 발의 먹물 탄을 부채꼴로 발사합니다."},
-	{"id":"eraser_bomb", "name":"지우개 폭탄", "desc":"목표 지점에 잠시 뒤 범위 폭발을 일으킵니다."},
-	{"id":"paper_plane", "name":"종이비행기", "desc":"적을 통과한 뒤 플레이어에게 돌아옵니다."},
-	{"id":"compass_spear", "name":"컴퍼스 창", "desc":"먼 적까지 뻗는 강한 관통 찌르기."},
-	{"id":"stamp_fist", "name":"도장 주먹", "desc":"가까운 적 주변을 넓게 내려칩니다."}
+	{"id":"pencil_sword", "name":"연필검", "desc":"근접 단일 공격 · 가장 가까운 적 1명", "damage_ratio":1.0},
+	{"id":"ink_orb", "name":"먹물 구슬", "desc":"유도 투사체 · 적 1명", "damage_ratio":1.0},
+	{"id":"orbit_line", "name":"회전 선분", "desc":"근접 회전 공격 · 반경 58 안 적 전체", "damage_ratio":0.8},
+	{"id":"ruler_spear", "name":"자 대검", "desc":"직선 관통 공격 · 궤적 위 적 전체", "damage_ratio":1.25},
+	{"id":"brush_burst", "name":"붓 폭발탄", "desc":"부채꼴 3발 발사 · 발당 피해", "damage_ratio":0.55},
+	{"id":"eraser_bomb", "name":"지우개 폭탄", "desc":"지연 폭발 · 반경 78 안 적 전체", "damage_ratio":1.55},
+	{"id":"paper_plane", "name":"종이비행기", "desc":"투척 후 귀환 · 첫 적 1명", "damage_ratio":0.9},
+	{"id":"compass_spear", "name":"컴퍼스 창", "desc":"장거리 직선 관통 · 궤적 위 적 전체", "damage_ratio":1.65},
+	{"id":"stamp_fist", "name":"도장 주먹", "desc":"범위 타격 · 목표 반경 88 안 적 전체", "damage_ratio":1.3}
 ]
 const POTENTIALS := [
 	{"id":"attack", "name":"공격력", "min":3, "max":8},
@@ -42,10 +46,11 @@ const POTENTIALS := [
 	{"id":"move_speed", "name":"이동 속도", "min":2, "max":5}
 ]
 const SKILLS := [
-	{"id":"ink_wave", "name":"잉크 파동", "role":"범위기", "description":"예정 효과: 반경 140 안에 공격력 120% 피해.", "icon":0, "cooldown":18.0, "radius":140.0, "damage_ratio":1.2},
-	{"id":"compass_pierce", "name":"컴퍼스 관통", "role":"단일기", "description":"예정 효과: 가장 가까운 적 하나에 공격력 300% 피해.", "icon":1, "cooldown":14.0, "damage_ratio":3.0},
-	{"id":"lifeline", "name":"생명선", "role":"체력 회복", "description":"예정 효과: 최대 체력의 30% 회복.", "icon":2, "cooldown":40.0, "heal_ratio":0.3},
-	{"id":"final_ink", "name":"종말의 획", "role":"극딜기", "description":"예정 효과: 1초 집중 후 한 대상에 공격력 700% 피해.", "icon":3, "cooldown":60.0, "charge_time":1.0, "damage_ratio":7.0}
+	{"id":"ink_wave", "name":"잉크 파동", "role":"범위 공격", "description":"반경 140 안 적 전체", "icon":0, "cooldown":18.0, "radius":140.0, "damage_ratio":1.2},
+	{"id":"compass_pierce", "name":"컴퍼스 관통", "role":"단일 공격", "description":"가장 가까운 적 1명", "icon":1, "cooldown":14.0, "damage_ratio":3.0},
+	{"id":"lifeline", "name":"생명선", "role":"회복", "description":"최대 체력 비례 회복", "icon":2, "cooldown":40.0, "heal_ratio":0.3},
+	{"id":"final_ink", "name":"종말의 획", "role":"단일 공격", "description":"1초 집중 후 가장 가까운 적 1명", "icon":3, "cooldown":60.0, "charge_time":1.0, "damage_ratio":7.0},
+	{"id":DASH_SKILL_ID, "name":"질주 충격", "role":"패시브", "description":"Space 대시 경로의 적 전체", "icon":-1, "passive":true, "damage_ratio":1.35}
 ]
 const ENEMY_DATA := {
 	"chaser": {"hp":40.0, "speed":48.0, "damage":9.0, "radius":13.0, "color":Color("33302b")},
@@ -475,14 +480,14 @@ func _update_lobby() -> void:
 			node.add_theme_color_override("font_color", Color("a74235"))
 		node.pressed.connect(_select_lobby_stage.bind(index))
 		lobby_stage_path.add_child(node)
-	if lobby_section != "home" and overlay.visible:
-		_open_lobby_window(lobby_section)
 
 
 func _weapon_description(weapon_id: String) -> String:
 	for weapon in WEAPONS:
 		if weapon.id == weapon_id:
-			return str(weapon.desc)
+			var attack_power := _weapon_attack_power(_equipped_item())
+			var damage_ratio := float(weapon.get("damage_ratio", 1.0))
+			return "%s  ·  공격력 %.0f%% / %.1f 피해" % [str(weapon.desc), damage_ratio * 100.0, attack_power * damage_ratio]
 	return "기본 무기"
 
 
@@ -645,7 +650,7 @@ func _build_lobby_section() -> Control:
 			equipped_heading.add_theme_font_size_override("font_size", 18)
 			details.add_child(equipped_heading)
 			var weapon_summary := Label.new()
-			weapon_summary.text = "%s 등급  ·  강화 +%d" % [RARITY_NAMES[int(equipped.get("rarity", 0))], int(equipped.get("enhancement", 0))]
+			weapon_summary.text = "%s 등급  ·  강화 +%d  ·  기본 공격력 %.1f" % [RARITY_NAMES[int(equipped.get("rarity", 0))], int(equipped.get("enhancement", 0)), _weapon_attack_power(equipped)]
 			details.add_child(weapon_summary)
 			var weapon_description := Label.new()
 			weapon_description.text = _weapon_description(selected_weapon)
@@ -892,7 +897,8 @@ func _build_lobby_section() -> Control:
 			for skill in SKILLS:
 				var skill_id := str(skill.id)
 				var is_owned := skills_owned.has(skill_id)
-				var assigned_slot := equipped_skill_slots.find(skill_id)
+				var is_passive := bool(skill.get("passive", false))
+				var assigned_slot := -1 if is_passive else equipped_skill_slots.find(skill_id)
 				var assignment_note := ""
 				if assigned_slot >= 0:
 					assignment_note = "  ·  %s 장착 중" % ["Q", "W", "E", "R"][assigned_slot]
@@ -922,17 +928,19 @@ func _build_lobby_section() -> Control:
 				skill_info.text = "%s  ·  %s%s%s%s\n%s" % [skill.name, skill.role, "  ·  Lv.%d" % skill_level if is_owned else "", "  ·  보유" if is_owned else "  ·  미수집", assignment_note, _skill_description(skill, skill_level)]
 				row.add_child(skill_info)
 				var equip_button := Button.new()
-				if not is_owned:
+				if is_passive:
+					equip_button.text = "패시브"
+				elif not is_owned:
 					equip_button.text = "미수집"
 				elif assigned_slot == selected_skill_slot:
 					equip_button.text = "장착됨"
 				elif assigned_slot >= 0:
 					equip_button.text = "이동"
 				else:
-					equip_button.text = "장착"
+					equip_button.text = "교체" if selected_skill_slot >= 0 and not equipped_skill_slots[selected_skill_slot].is_empty() else "장착"
 				equip_button.custom_minimum_size = Vector2(76.0, 34.0)
-				equip_button.disabled = not is_owned or selected_skill_slot < 0 or assigned_slot == selected_skill_slot
-				if is_owned and selected_skill_slot >= 0:
+				equip_button.disabled = is_passive or not is_owned or selected_skill_slot < 0 or assigned_slot == selected_skill_slot
+				if is_owned and not is_passive and selected_skill_slot >= 0:
 					equip_button.pressed.connect(_equip_skill_to_slot.bind(skill_id, selected_skill_slot))
 				row.add_child(equip_button)
 				if is_owned:
@@ -1059,6 +1067,11 @@ func _item_icon(index: int) -> AtlasTexture:
 
 
 func _skill_icon(skill_id: String) -> AtlasTexture:
+	if skill_id == DASH_SKILL_ID:
+		var dash_icon := AtlasTexture.new()
+		dash_icon.atlas = ACTION_ATLAS
+		dash_icon.region = Rect2(0.0, ACTION_FRAME_SIZE.y * 3.0, ACTION_FRAME_SIZE.x, ACTION_FRAME_SIZE.y)
+		return dash_icon
 	var icon_index := 4
 	for skill in SKILLS:
 		if str(skill.id) == skill_id:
@@ -1088,6 +1101,10 @@ func _skill_upgrade_cost(level: int) -> int:
 	return 3 + maxi(0, level - 1) * 2
 
 
+func _skill_strength(skill_id: String) -> float:
+	return 1.0 + float(maxi(0, int(skill_levels.get(skill_id, 1)) - 1)) * 0.15
+
+
 func _can_draw_skill() -> bool:
 	if skills_owned.size() < SKILLS.size():
 		return true
@@ -1098,13 +1115,18 @@ func _can_draw_skill() -> bool:
 
 
 func _skill_description(skill: Dictionary, level: int) -> String:
+	var skill_id := str(skill.get("id", ""))
 	var strength := 1.0 + float(maxi(0, level - 1)) * 0.15
 	var cooldown := maxf(5.0, float(skill.get("cooldown", 10.0)) * (1.0 - float(level - 1) * 0.025))
-	match str(skill.get("id", "")):
-		"ink_wave": return "반경 %d 안에 공격력 %.0f%% 피해. 쿨다운 %.0f초." % [int(skill.radius), float(skill.damage_ratio) * strength * 100.0, cooldown]
-		"compass_pierce": return "가장 가까운 적 하나에 공격력 %.0f%% 피해. 쿨다운 %.0f초." % [float(skill.damage_ratio) * strength * 100.0, cooldown]
-		"lifeline": return "최대 체력의 %.0f%% 회복. 쿨다운 %.0f초." % [minf(0.75, float(skill.heal_ratio) * strength) * 100.0, cooldown]
-		"final_ink": return "1초 집중 후 공격력 %.0f%% 피해. 쿨다운 %.0f초." % [float(skill.damage_ratio) * strength * 100.0, cooldown]
+	if bool(skill.get("passive", false)):
+		var dash_ratio := float(skill.get("damage_ratio", 1.0)) * strength
+		var dash_damage := _weapon_attack_power(_equipped_item()) * dash_ratio
+		return "패시브 · Space 대시 경로의 적 전체 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.1f초" % [dash_ratio * 100.0, dash_damage, DASH_COOLDOWN_DURATION]
+	match skill_id:
+		"ink_wave": return "반경 %d 안 적 전체 · 공격력 %.0f%% / %.1f 피해/대상 · 쿨다운 %.0f초" % [int(skill.radius), float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cooldown]
+		"compass_pierce": return "가장 가까운 적 1명 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.0f초" % [float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cooldown]
+		"lifeline": return "최대 체력 %.0f%% 회복 · 쿨다운 %.0f초" % [minf(0.75, float(skill.heal_ratio) * strength) * 100.0, cooldown]
+		"final_ink": return "1초 집중 후 적 1명 · 공격력 %.0f%% / %.1f 피해 · 쿨다운 %.0f초" % [float(skill.damage_ratio) * strength * 100.0, _weapon_attack_power(_equipped_item()) * float(skill.damage_ratio) * strength, cooldown]
 	return str(skill.get("description", ""))
 
 
@@ -1130,7 +1152,7 @@ func _use_skill(slot_index: int) -> void:
 	if skill.is_empty():
 		return
 	var level := int(skill_levels.get(skill_id, 1))
-	var strength := 1.0 + float(level - 1) * 0.15
+	var strength := _skill_strength(skill_id)
 	var cooldown := maxf(5.0, float(skill.cooldown) * (1.0 - float(level - 1) * 0.025))
 	skill_cooldowns[skill_id] = cooldown
 	match skill_id:
@@ -1172,11 +1194,13 @@ func _update_skill_hud() -> void:
 
 
 func _equip_skill_to_slot(skill_id: String, slot_index: int) -> void:
-	if slot_index < 0 or slot_index >= equipped_skill_slots.size() or not skills_owned.has(skill_id):
+	if slot_index < 0 or slot_index >= equipped_skill_slots.size() or not skills_owned.has(skill_id) or bool(_skill_data(skill_id).get("passive", false)):
 		return
-	for index in equipped_skill_slots.size():
-		if equipped_skill_slots[index] == skill_id:
-			equipped_skill_slots[index] = ""
+	var previous_slot := equipped_skill_slots.find(skill_id)
+	if previous_slot == slot_index:
+		return
+	if previous_slot >= 0:
+		equipped_skill_slots[previous_slot] = equipped_skill_slots[slot_index]
 	equipped_skill_slots[slot_index] = skill_id
 	_save_progress()
 	_update_skill_hud()
@@ -1222,6 +1246,8 @@ func _equip_weapon_uid(uid: int) -> void:
 
 func _refresh_lobby_window() -> void:
 	_update_lobby()
+	if lobby_section != "home" and overlay.visible:
+		_open_lobby_window(lobby_section)
 
 
 func _enhancement_cost(item: Dictionary) -> int:
@@ -1327,6 +1353,7 @@ func _draw_skill() -> void:
 		if not skills_owned.has(str(skill.id)):
 			unowned.append(skill)
 	var result: Dictionary
+	var obtained_new_skill := not unowned.is_empty()
 	magic_shards -= SKILL_GACHA_COST
 	if not unowned.is_empty():
 		result = unowned[rng.randi_range(0, unowned.size() - 1)]
@@ -1343,13 +1370,14 @@ func _draw_skill() -> void:
 		var owned_skill_id := upgradeable[rng.randi_range(0, upgradeable.size() - 1)]
 		result = _skill_data(owned_skill_id)
 		skill_levels[owned_skill_id] = int(skill_levels.get(owned_skill_id, 1)) + 1
-	last_lobby_message = "새 스킬 획득: %s · 스킬 탭에서 QWER 슬롯에 장착할 수 있습니다." % result.name
+	var result_level := int(skill_levels.get(str(result.id), 1))
+	last_lobby_message = "새 스킬 획득: %s" % result.name if obtained_new_skill else "%s 스킬이 Lv.%d로 강화됐습니다." % [result.name, result_level]
 	_save_progress()
 	var previews: Array[Dictionary] = []
 	for skill in SKILLS:
 		if not skills_owned.has(str(skill.id)) or str(skill.id) == str(result.id):
 			previews.append({"icon":_skill_icon(str(skill.id)), "label":str(skill.name)})
-	await reward_presentation.reveal_gacha(previews, _skill_icon(str(result.id)), str(result.name), "%s\n현재는 로비 장착과 슬롯 표시만 지원합니다." % result.description, Color("63b8a0"))
+	await reward_presentation.reveal_gacha(previews, _skill_icon(str(result.id)), str(result.name), _skill_description(result, result_level), Color("63b8a0"))
 
 
 func _enhance_equipped_weapon() -> void:
@@ -1517,13 +1545,11 @@ func _reset_run() -> void:
 	player_anim_time = 0.0
 	player_position = Vector2(W / 2.0, H / 2.0)
 	var item := _equipped_item()
-	var rarity := clampi(int(item.get("rarity", 0)), 0, RARITY_DAMAGE.size() - 1)
-	var attack_bonus := _potential_total(item, "attack")
 	var speed_bonus := _potential_total(item, "attack_speed")
 	player_max_hp = 100.0 * (1.0 + _potential_total(item, "max_health") / 100.0)
 	player_hp = player_max_hp
 	player_speed = 190.0 * (1.0 + _potential_total(item, "move_speed") / 100.0)
-	player_damage = 25.0 * float(RARITY_DAMAGE[rarity]) * pow(1.1, float(item.get("enhancement", 0))) * (1.0 + attack_bonus / 100.0)
+	player_damage = _weapon_attack_power(item)
 	attack_rate = 0.72 * 100.0 / (100.0 + speed_bonus)
 	facing = 1.0
 	enemies.clear()
@@ -1537,6 +1563,7 @@ func _reset_run() -> void:
 func _load_progress() -> void:
 	var saved_progress := ProgressStore.load_progress()
 	var has_save := bool(saved_progress.get("_has_save", false))
+	var skill_progress_changed := false
 	var saved_selected := "pencil_sword"
 	if has_save:
 		stage_index = clampi(int(saved_progress.get("stage_index", 0)), 0, STAGE_IDS.size() - 1)
@@ -1561,7 +1588,7 @@ func _load_progress() -> void:
 		if stored_slots is Array:
 			for index in mini(4, stored_slots.size()):
 				var skill_id := str(stored_slots[index])
-				if skills_owned.has(skill_id) and not equipped_skill_slots.has(skill_id):
+				if skills_owned.has(skill_id) and not bool(_skill_data(skill_id).get("passive", false)) and not equipped_skill_slots.has(skill_id):
 					equipped_skill_slots[index] = skill_id
 		saved_selected = str(saved_progress.get("selected_weapon", "pencil_sword"))
 		var stored_inventory: Variant = saved_progress.get("weapon_inventory", [])
@@ -1601,6 +1628,15 @@ func _load_progress() -> void:
 		selected_index = 0
 	selected_weapon_uid = int(weapon_inventory[selected_index].uid)
 	selected_weapon = str(weapon_inventory[selected_index].get("weapon_id", "pencil_sword"))
+	if not skills_owned.has(DASH_SKILL_ID):
+		skills_owned.append(DASH_SKILL_ID)
+		skill_levels[DASH_SKILL_ID] = 1
+		skill_progress_changed = true
+	elif not skill_levels.has(DASH_SKILL_ID):
+		skill_levels[DASH_SKILL_ID] = 1
+		skill_progress_changed = true
+	if skill_progress_changed:
+		_save_progress()
 
 
 func _save_progress() -> void:
@@ -1873,6 +1909,11 @@ func _damage_target(target: Dictionary, amount: float) -> void:
 
 func _auto_attack() -> void:
 	var damage := _effective_damage()
+	var damage_ratio := 1.0
+	for weapon in WEAPONS:
+		if str(weapon.id) == selected_weapon:
+			damage_ratio = float(weapon.get("damage_ratio", 1.0))
+			break
 	var target := _nearest_target(470.0)
 	var target_position: Vector2 = target.get("position", player_position + Vector2(facing * 120.0, 0.0))
 	var direction := (target_position - player_position).normalized()
@@ -1893,52 +1934,52 @@ func _auto_attack() -> void:
 			var close_target := _nearest_target(185.0)
 			if not close_target.is_empty():
 				slash_timer = 0.18
-				_damage_target(close_target, damage)
+				_damage_target(close_target, damage * damage_ratio)
 		"ink_orb":
 			if not target.is_empty():
-				_spawn_player_shot("ink_orb", direction * 275.0, player_position, damage, 2.5)
+				_spawn_player_shot("ink_orb", direction * 275.0, player_position, damage * damage_ratio, 2.5)
 		"orbit_line":
 			for enemy in enemies.duplicate():
 				if enemy.position.distance_to(player_position) < 58.0:
-					_damage_enemy(enemy, damage * 0.8)
+					_damage_enemy(enemy, damage * damage_ratio)
 			if not boss.is_empty() and boss.position.distance_to(player_position) < 58.0:
-				_damage_boss(damage * 0.8)
+				_damage_boss(damage * damage_ratio)
 		"ruler_spear":
 			if not target.is_empty():
 				var end := player_position + direction * minf(430.0, player_position.distance_to(target_position) + 45.0)
 				slash_timer = 0.2
 				for enemy in enemies.duplicate():
 					if _segment_distance(enemy.position, player_position, end) < float(enemy.radius) + 16.0:
-						_damage_enemy(enemy, damage * 1.25)
+						_damage_enemy(enemy, damage * damage_ratio)
 				if not boss.is_empty() and _segment_distance(boss.position, player_position, end) < float(boss.radius) + 16.0:
-					_damage_boss(damage * 1.25)
+					_damage_boss(damage * damage_ratio)
 		"brush_burst":
 			if not target.is_empty():
 				for angle in [-0.24, 0.0, 0.24]:
-					_spawn_player_shot("brush_burst", direction.rotated(angle) * 250.0, player_position, damage * 0.55, 1.7)
+					_spawn_player_shot("brush_burst", direction.rotated(angle) * 250.0, player_position, damage * damage_ratio, 1.7)
 		"eraser_bomb":
 			if not target.is_empty():
-				projectiles.append({"team":"player", "kind":"eraser_bomb", "position":target_position, "velocity":Vector2.ZERO, "life":0.7, "damage":damage * 1.55})
+				projectiles.append({"team":"player", "kind":"eraser_bomb", "position":target_position, "velocity":Vector2.ZERO, "life":0.7, "damage":damage * damage_ratio})
 		"paper_plane":
 			if not target.is_empty():
-				_spawn_player_shot("paper_plane", direction * 290.0, player_position, damage * 0.9, 2.4)
+				_spawn_player_shot("paper_plane", direction * 290.0, player_position, damage * damage_ratio, 2.4)
 		"compass_spear":
 			if not target.is_empty():
 				var end := player_position + direction * 475.0
 				slash_timer = 0.24
 				for enemy in enemies.duplicate():
 					if _segment_distance(enemy.position, player_position, end) < float(enemy.radius) + 20.0:
-						_damage_enemy(enemy, damage * 1.65)
+						_damage_enemy(enemy, damage * damage_ratio)
 				if not boss.is_empty() and _segment_distance(boss.position, player_position, end) < float(boss.radius) + 20.0:
-					_damage_boss(damage * 1.65)
+					_damage_boss(damage * damage_ratio)
 		"stamp_fist":
 			if not target.is_empty():
 				slash_timer = 0.24
 				for enemy in enemies.duplicate():
 					if enemy.position.distance_to(target_position) < 88.0:
-						_damage_enemy(enemy, damage * 1.3)
+						_damage_enemy(enemy, damage * damage_ratio)
 				if not boss.is_empty() and boss.position.distance_to(target_position) < 88.0:
-					_damage_boss(damage * 1.3)
+					_damage_boss(damage * damage_ratio)
 func _start_player_animation(row: int, duration: float, weapon_specific: bool = false) -> void:
 	player_anim_row = row
 	player_anim_duration = duration
@@ -1952,6 +1993,13 @@ func _spawn_player_shot(kind: String, velocity: Vector2, position: Vector2, dama
 
 func _effective_damage() -> float:
 	return player_damage
+
+
+func _weapon_attack_power(item: Dictionary) -> float:
+	var rarity := clampi(int(item.get("rarity", 0)), 0, RARITY_DAMAGE.size() - 1)
+	var enhancement := clampi(int(item.get("enhancement", 0)), 0, MAX_ENHANCEMENT)
+	var attack_bonus := _potential_total(item, "attack")
+	return 25.0 * float(RARITY_DAMAGE[rarity]) * pow(1.1, float(enhancement)) * (1.0 + attack_bonus / 100.0)
 
 
 func _damage_enemy(enemy: Dictionary, amount: float) -> void:
@@ -2005,12 +2053,14 @@ func dash() -> void:
 	invulnerability = 0.48
 	dash_timer = 0.2
 	_start_player_animation(3, 0.32)
-	dash_cooldown = 2.5
+	dash_cooldown = DASH_COOLDOWN_DURATION
+	var dash_skill := _skill_data(DASH_SKILL_ID)
+	var dash_damage_ratio := float(dash_skill.get("damage_ratio", 1.35)) * _skill_strength(DASH_SKILL_ID)
 	for enemy in enemies.duplicate():
 		if _segment_distance(enemy.position, old_position, player_position) < float(enemy.radius) + 13.0:
-			_damage_enemy(enemy, _effective_damage() * 1.35)
+			_damage_enemy(enemy, _effective_damage() * dash_damage_ratio)
 	if not boss.is_empty() and _segment_distance(boss.position, old_position, player_position) < float(boss.radius) + 12.0:
-		_damage_boss(_effective_damage() * 1.35)
+		_damage_boss(_effective_damage() * dash_damage_ratio)
 	_burst(player_position, Color("69c5bd"), 7)
 
 
