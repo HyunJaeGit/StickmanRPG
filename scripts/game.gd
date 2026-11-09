@@ -9,10 +9,17 @@ const LOBBY_VIEW_SCRIPT = preload("res://scripts/lobby_view.gd")
 const TITLE_SCREEN_SCRIPT = preload("res://scripts/title_screen.gd")
 const RENDERER_SCENE: PackedScene = preload("res://scenes/game_renderer.tscn")
 const REWARD_PRESENTATION_SCENE: PackedScene = preload("res://scenes/reward_presentation.tscn")
+const CUTSCENE_PRESENTATION_SCENE: PackedScene = preload("res://scenes/cutscene_presentation.tscn")
 const CHARACTER_ATLAS: Texture2D = preload("res://art/stickman_characters_atlas.png")
 const ITEM_ATLAS: Texture2D = preload("res://art/weapon_items_atlas.png")
 const MAGIC_SKILL_ATLAS: Texture2D = preload("res://art/magic_skill_icons.png")
 const ACTION_ATLAS: Texture2D = preload("res://art/stickman_action_animation_atlas.png")
+const LOBBY_BGM: AudioStream = preload("res://art/BGM_lobby.mp3")
+const FIGHT_BGM: AudioStream = preload("res://art/BGM_fight.mp3")
+const UI_CLICK_SFX: AudioStream = preload("res://art/click.ogg")
+const ENEMY_DEATH_SFX: AudioStream = preload("res://art/enemy_death.mp3")
+const PLAYER_HIT_SFX: AudioStream = preload("res://art/hit.ogg")
+const ATTACK_SWIPE_SFX: AudioStream = preload("res://art/swipe.wav")
 const CHARACTER_CELL := 512.0
 const ITEM_CELL := 362.0
 const MAGIC_SKILL_CELL := Vector2(2172.0 / 5.0, 434.0)
@@ -80,6 +87,7 @@ var boss_mechanic_message_timer := 0.0
 var rng := RandomNumberGenerator.new()
 var game_renderer: GameRenderer
 var reward_presentation: RewardPresentation
+var cutscene_presentation: Control
 var lobby_view: LobbyView
 var title_screen: Control
 var ui: CanvasLayer
@@ -100,6 +108,17 @@ var lobby_modal_body: VBoxContainer
 var master_volume_percent := 80
 var settings_volume_label: Label
 var selected_skill_slot := -1
+var pending_cutscene_action := ""
+var pending_battle_result: Dictionary = {}
+var boss_cutscene_pending := false
+var run_start_gold := 0
+var run_start_weapon_shards := 0
+var run_start_magic_shards := 0
+var bgm_player: AudioStreamPlayer
+var ui_click_player: AudioStreamPlayer
+var enemy_death_player: AudioStreamPlayer
+var player_hit_player: AudioStreamPlayer
+var attack_swipe_player: AudioStreamPlayer
 
 
 func _ready() -> void:
@@ -112,6 +131,12 @@ func _ready() -> void:
 	reward_presentation.closed.connect(_on_reward_presentation_closed)
 	add_child(reward_presentation)
 	_build_ui()
+	cutscene_presentation = CUTSCENE_PRESENTATION_SCENE.instantiate() as Control
+	cutscene_presentation.connect("sequence_finished", _on_cutscene_finished)
+	ui.add_child(cutscene_presentation)
+	_setup_audio()
+	get_tree().node_added.connect(_watch_ui_sound_node)
+	_watch_existing_buttons(ui)
 	_show_title_screen()
 	game_renderer.queue_redraw()
 
@@ -123,6 +148,8 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if mode == "cutscene":
+		return
 	if mode == "playing" and not overlay.visible and not reward_presentation.shade.visible and event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).physical_keycode == KEY_G:
 		_try_boss_counter()
 		get_viewport().set_input_as_handled()
@@ -365,6 +392,7 @@ func _show_unowned_skill_info(skill: Dictionary) -> void:
 
 func _show_title_screen() -> void:
 	mode = "title"
+	_play_bgm(LOBBY_BGM)
 	get_tree().paused = false
 	lobby_view.hide()
 	skill_hud.visible = false
@@ -462,6 +490,7 @@ func _show_confirmation(title: String, message: String, confirm_text: String, ca
 
 func show_lobby() -> void:
 	mode = "lobby"
+	_play_bgm(LOBBY_BGM)
 	lobby_section = "home"
 	title_screen.hide()
 	skill_hud.visible = false
@@ -649,6 +678,66 @@ func _apply_master_volume() -> void:
 	AudioServer.set_bus_mute(bus_index, master_volume_percent == 0)
 	if master_volume_percent > 0:
 		AudioServer.set_bus_volume_db(bus_index, linear_to_db(float(master_volume_percent) / 100.0))
+
+
+## BGM과 UI 효과음을 준비하고, 화면 상태에 맞는 곡으로 전환합니다.
+func _setup_audio() -> void:
+	bgm_player = AudioStreamPlayer.new()
+	bgm_player.name = "BGMPlayer"
+	bgm_player.bus = "Master"
+	bgm_player.volume_db = -7.0
+	bgm_player.finished.connect(func(): bgm_player.play())
+	add_child(bgm_player)
+	ui_click_player = AudioStreamPlayer.new()
+	ui_click_player.name = "UIClickPlayer"
+	ui_click_player.stream = UI_CLICK_SFX
+	ui_click_player.bus = "Master"
+	ui_click_player.volume_db = -3.0
+	ui_click_player.max_polyphony = 4
+	add_child(ui_click_player)
+	enemy_death_player = _new_sfx_player("EnemyDeathPlayer", ENEMY_DEATH_SFX, -8.0, 8)
+	player_hit_player = _new_sfx_player("PlayerHitPlayer", PLAYER_HIT_SFX, -5.0, 3)
+	attack_swipe_player = _new_sfx_player("AttackSwipePlayer", ATTACK_SWIPE_SFX, -9.0, 4)
+
+
+func _new_sfx_player(player_name: String, sound: AudioStream, volume: float, polyphony: int) -> AudioStreamPlayer:
+	var player := AudioStreamPlayer.new()
+	player.name = player_name
+	player.stream = sound
+	player.bus = "Master"
+	player.volume_db = volume
+	player.max_polyphony = polyphony
+	add_child(player)
+	return player
+
+
+func _play_sfx(player: AudioStreamPlayer) -> void:
+	if is_instance_valid(player):
+		player.pitch_scale = rng.randf_range(0.94, 1.06)
+		player.play()
+
+
+func _play_bgm(track: AudioStream) -> void:
+	if not is_instance_valid(bgm_player) or bgm_player.stream == track:
+		return
+	bgm_player.stream = track
+	bgm_player.play()
+
+
+func _watch_existing_buttons(node: Node) -> void:
+	if node is Button:
+		_watch_ui_sound_node(node)
+	for child in node.get_children():
+		_watch_existing_buttons(child)
+
+
+func _watch_ui_sound_node(node: Node) -> void:
+	if node is Button and not node.pressed.is_connected(_play_ui_click):
+		node.pressed.connect(_play_ui_click)
+
+
+func _play_ui_click() -> void:
+	_play_sfx(ui_click_player)
 
 
 func _set_fullscreen(enabled: bool) -> void:
@@ -1099,7 +1188,7 @@ func _build_lobby_section() -> Control:
 			back_button.custom_minimum_size.y = 42.0
 			back_button.pressed.connect(func(): _open_lobby_window("settings"))
 			body.add_child(back_button)
-		_: 
+		_:
 			var hint := Label.new()
 			hint.text = "스테이지 보상 골드로 무기를 강화하고, 무기 조각으로 뽑기와 합성을 하세요."
 			body.add_child(hint)
@@ -1592,13 +1681,64 @@ func _weapon_name(weapon_id: String) -> String:
 
 func start_run() -> void:
 	_reset_run()
-	mode = "playing"
+	_play_bgm(FIGHT_BGM)
 	lobby_view.hide()
-	skill_hud.visible = true
 	get_tree().paused = false
 	overlay.hide()
+	run_start_gold = gold
+	run_start_weapon_shards = weapon_shards
+	run_start_magic_shards = magic_shards
 	last_lobby_message = "%s에 출전했습니다." % GAME_DATA.STAGE_IDS[stage_index]
+	var stage_id: String = GAME_DATA.STAGE_IDS[stage_index]
+	if stage_id.ends_with("-1"):
+		mode = "cutscene"
+		pending_cutscene_action = "combat"
+		skill_hud.visible = false
+		cutscene_presentation.call("play_chapter_intro", stage_id)
+		return
+	_begin_combat()
+
+
+func _begin_combat() -> void:
+	mode = "playing"
+	skill_hud.visible = true
 	_update_hud()
+
+
+func _on_cutscene_finished() -> void:
+	var action := pending_cutscene_action
+	pending_cutscene_action = ""
+	match action:
+		"combat":
+			_begin_combat()
+		"boss_combat":
+			_spawn_stage_boss()
+			mode = "playing"
+			boss_cutscene_pending = false
+			boss_bar.show()
+			_update_hud()
+		"ending_result":
+			cutscene_presentation.call("show_result", pending_battle_result)
+			pending_cutscene_action = "result_lobby"
+		"result_lobby":
+			show_lobby()
+		_:
+			show_lobby()
+
+
+func _show_boss_intro() -> void:
+	if boss_cutscene_pending:
+		return
+	boss_cutscene_pending = true
+	mode = "cutscene"
+	skill_hud.visible = false
+	boss_bar.hide()
+	pending_cutscene_action = "boss_combat"
+	cutscene_presentation.call("play_boss_intro", GAME_DATA.STAGE_IDS[stage_index])
+
+
+func _spawn_stage_boss() -> void:
+	boss = {"position":Vector2(W/2.0, 90.0), "hp":4350.0, "max_hp":4350.0, "radius":35.0, "attack":1.9, "warning":0.0, "phase":0, "aim_y":0.0, "special_thresholds":[0.7, 0.3], "special_state":"", "special_timer":0.0, "special_target":Vector2(W/2.0, H/2.0), "special_face":1.0, "damage_reduction":0.0, "stagger_timer":0.0, "counter_window":0.0, "counter_success":false}
 
 
 func _reset_run() -> void:
@@ -1616,6 +1756,7 @@ func _reset_run() -> void:
 	stage_enemy_quota = int(GAME_DATA.STAGE_ENEMY_COUNTS[GAME_DATA.STAGE_IDS[stage_index]])
 	stage_enemies_spawned = 0
 	stage_boss_spawned = false
+	boss_cutscene_pending = false
 	attack_timer = 0.0
 	dash_timer = 0.0
 	dash_cooldown = 0.0
@@ -1832,6 +1973,8 @@ func _update_game(delta: float) -> void:
 			return
 		attack_timer = attack_rate
 	_spawn_enemies(delta)
+	if mode != "playing":
+		return
 	_update_enemies(delta)
 	if mode != "playing":
 		return
@@ -1880,8 +2023,7 @@ func _spawn_enemies(delta: float) -> void:
 		return
 	if GAME_DATA.BOSS_STAGES.has(stage_id) and not stage_boss_spawned and enemies.is_empty():
 		stage_boss_spawned = true
-		boss = {"position":Vector2(W/2.0, 90.0), "hp":4350.0, "max_hp":4350.0, "radius":35.0, "attack":1.9, "warning":0.0, "phase":0, "aim_y":0.0, "special_thresholds":[0.7, 0.3], "special_state":"", "special_timer":0.0, "special_target":Vector2(W/2.0, H/2.0), "special_face":1.0, "damage_reduction":0.0, "stagger_timer":0.0, "counter_window":0.0, "counter_success":false}
-		boss_bar.show()
+		_show_boss_intro()
 	elif not GAME_DATA.BOSS_STAGES.has(stage_id) and enemies.is_empty():
 		finish(true)
 
@@ -2067,6 +2209,7 @@ func _auto_attack() -> void:
 	attack_indicator_area_radius = float(weapon.get("area_radius", 0.0))
 	attack_indicator_area_center = str(weapon.get("area_center", "target"))
 	if not target.is_empty():
+		_play_sfx(attack_swipe_player)
 		var weapon_durations := [0.34, 0.46, 0.52, 0.44, 0.48, 0.52, 0.42, 0.36, 0.52]
 		var weapon_row := _weapon_icon_index(selected_weapon)
 		_start_player_animation(weapon_row, float(weapon_durations[weapon_row]), true)
@@ -2155,6 +2298,7 @@ func _damage_enemy(enemy: Dictionary, amount: float) -> void:
 func _kill_enemy(enemy: Dictionary) -> void:
 	enemies.erase(enemy)
 	kills += 1
+	_play_sfx(enemy_death_player)
 	_burst(enemy.position, Color("24211d"), 12)
 	var base_gold := 3 + stage_index * 2
 	if enemy.kind == "elite":
@@ -2184,6 +2328,7 @@ func dash() -> void:
 	if direction == Vector2.ZERO:
 		direction = Vector2(facing, 0.0)
 	var old_position := player_position
+	_play_sfx(attack_swipe_player)
 	dash_origin = old_position
 	player_position += direction.normalized() * 118.0
 	player_position.x = clampf(player_position.x, 20.0, W - 20.0)
@@ -2349,6 +2494,7 @@ func _hurt(amount: float) -> void:
 	if invulnerability > 0.0 or mode != "playing":
 		return
 	player_hp -= maxf(1.0, amount)
+	_play_sfx(player_hit_player)
 	invulnerability = 0.7
 	_start_player_animation(2, 0.32)
 	_burst(player_position, Color("bd4e40"), 9)
@@ -2385,9 +2531,32 @@ func finish(won: bool) -> void:
 	else:
 		stage_index = maxi(0, stage_index - 1)
 		last_lobby_message = "%s에서 쓰러졌습니다. 한 단계 후퇴해 %s부터 재도전합니다. 정산된 무기와 조각은 유지됩니다." % [finished_stage, GAME_DATA.STAGE_IDS[stage_index]]
+	var result_story := "길은 이어진다. 다음 페이지에서 잉크의 근원을 쫓아라." if won else "연필선은 끊겼지만, 주운 재화와 장비는 남았다. 다시 준비해 돌아오자."
+	var result_rewards := "전투 중 획득 골드 +%d · 무기 조각 +%d · 마력 조각 +%d" % [gold - run_start_gold, weapon_shards - run_start_weapon_shards, magic_shards - run_start_magic_shards]
+	pending_battle_result = {
+		"stage":finished_stage,
+		"won":won,
+		"story":result_story,
+		"kills":kills,
+		"time":_format_time(elapsed),
+		"rewards":result_rewards,
+		"gold":gold,
+		"weapon_shards":weapon_shards,
+		"magic_shards":magic_shards,
+		"next_stage":GAME_DATA.STAGE_IDS[stage_index]
+	}
 	_save_progress()
 	_reset_run()
-	show_lobby()
+	mode = "cutscene"
+	skill_hud.visible = false
+	get_tree().paused = false
+	_play_bgm(LOBBY_BGM)
+	if won and GAME_DATA.BOSS_STAGES.has(finished_stage):
+		pending_cutscene_action = "ending_result"
+		cutscene_presentation.call("play_ending", finished_stage)
+	else:
+		cutscene_presentation.call("show_result", pending_battle_result)
+		pending_cutscene_action = "result_lobby"
 
 
 func _format_time(seconds: float) -> String:
