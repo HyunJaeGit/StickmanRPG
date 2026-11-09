@@ -206,12 +206,33 @@ func _draw_enemy(enemy: Dictionary) -> void:
 
 func _draw_boss() -> void:
 	var boss_position: Vector2 = game.boss.position
+	var special_state := str(game.boss.get("special_state", ""))
+	if special_state in ["gather", "charge"]:
+		var pulse := 0.62 + 0.28 * sin(game.elapsed * 10.0)
+		draw_circle(boss_position, 79.0, Color(0.12, 0.58, 0.95, 0.10 + pulse * 0.08))
+		draw_arc(boss_position, 68.0 + pulse * 7.0, 0.0, TAU, 48, Color(0.26, 0.75, 1.0, pulse), 5.0, true)
+		if special_state == "charge":
+			var remaining := maxf(0.0, 5.0 - float(game.boss.get("special_timer", 0.0)))
+			var seconds_left := int(ceil(remaining))
+			draw_string(ThemeDB.fallback_font, boss_position + Vector2(-8.0, -92.0), str(seconds_left), HORIZONTAL_ALIGNMENT_CENTER, 30.0, 26, Color("8bdcff"))
+	if special_state in ["slam", "recover"]:
+		var facing := float(game.boss.get("special_face", 1.0))
+		var front_origin := boss_position + Vector2(facing * 46.0, 0.0)
+		var front_end := boss_position + Vector2(facing * 168.0, 0.0)
+		draw_colored_polygon(PackedVector2Array([boss_position, front_end + Vector2(0.0, -92.0), front_end + Vector2(0.0, 92.0)]), Color(0.87, 0.19, 0.12, 0.17))
+		draw_line(front_origin, front_end, Color(1.0, 0.37, 0.25, 0.62), 7.0, true)
+		if special_state == "slam" and float(game.boss.get("counter_window", 0.0)) > 0.0:
+			draw_arc(front_origin, 38.0, -0.85 if facing > 0.0 else PI - 0.85, 0.85 if facing > 0.0 else PI + 0.85, 24, Color("fff0a2"), 6.0, true)
 	if game.boss.warning > 0.0:
 		if game.boss.phase == 1:
 			draw_line(Vector2(30,game.boss.aim_y),Vector2(W-30,game.boss.aim_y),Color(0.76,0.25,0.21,0.62),18.0,true)
 		else:
 			draw_arc(game.player_position,53.0,0.0,TAU,36,Color(0.76,0.25,0.21,0.62),5.0)
-	var boss_tint := Color("e99a85") if float(game.boss.get("flash", 0.0)) > 0.0 else Color.WHITE
+	var boss_tint := Color("76cfff") if special_state in ["gather", "charge"] else Color("e99a85") if float(game.boss.get("flash", 0.0)) > 0.0 else Color.WHITE
 	var recoil: Vector2 = (boss_position - game.player_position).normalized() * 7.0 if float(game.boss.get("hit_time", 0.0)) > 0.0 else Vector2.ZERO
 	var boss_direction := 1.0 if game.player_position.x >= boss_position.x else -1.0
 	_draw_character(boss_position + recoil, Vector2(126.0, 142.0), 5, boss_tint, boss_direction)
+	if game.boss_mechanic_message_timer > 0.0 and not game.boss_mechanic_message.is_empty():
+		var message_color := Color("9cddff") if special_state in ["gather", "charge", "slam"] else Color("f7e7cb")
+		draw_rect(Rect2(140.0, 118.0, 680.0, 44.0), Color(0.08, 0.13, 0.18, 0.82), true)
+		draw_string(ThemeDB.fallback_font, Vector2(480.0, 148.0), game.boss_mechanic_message, HORIZONTAL_ALIGNMENT_CENTER, 660.0, 24, message_color)

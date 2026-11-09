@@ -72,6 +72,8 @@ var drops: Array[Dictionary] = []
 var projectiles: Array[Dictionary] = []
 var particles: Array[Dictionary] = []
 var boss: Dictionary = {}
+var boss_mechanic_message := ""
+var boss_mechanic_message_timer := 0.0
 var rng := RandomNumberGenerator.new()
 var game_renderer: GameRenderer
 var reward_presentation: RewardPresentation
@@ -123,6 +125,10 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if mode == "playing" and not overlay.visible and not reward_presentation.shade.visible and event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).physical_keycode == KEY_G:
+		_try_boss_counter()
+		get_viewport().set_input_as_handled()
+		return
 	if mode == "playing" and not overlay.visible and not reward_presentation.shade.visible:
 		if event is InputEventKey and event.pressed and not event.echo:
 			var key_event := event as InputEventKey
@@ -1624,6 +1630,8 @@ func _reset_run() -> void:
 	skill_cast_duration = 0.0
 	skill_cast_target_ref = {}
 	attack_indicator_timer = 0.0
+	boss_mechanic_message = ""
+	boss_mechanic_message_timer = 0.0
 	kills = 0
 	spawn_timer = 0.0
 	stage_enemy_quota = int(GAME_DATA.STAGE_ENEMY_COUNTS[GAME_DATA.STAGE_IDS[stage_index]])
@@ -1774,6 +1782,9 @@ func _update_game(delta: float) -> void:
 	elapsed += delta
 	attack_timer -= delta
 	attack_indicator_timer = maxf(0.0, attack_indicator_timer - delta)
+	boss_mechanic_message_timer = maxf(0.0, boss_mechanic_message_timer - delta)
+	if boss_mechanic_message_timer <= 0.0:
+		boss_mechanic_message = ""
 	skill_cast_timer = maxf(0.0, skill_cast_timer - delta)
 	if not skill_cast_target_ref.is_empty():
 		if bool(skill_cast_target_ref.get("is_boss", false)):
@@ -1840,7 +1851,7 @@ func _spawn_enemies(delta: float) -> void:
 		return
 	if GAME_DATA.BOSS_STAGES.has(stage_id) and not stage_boss_spawned and enemies.is_empty():
 		stage_boss_spawned = true
-		boss = {"position":Vector2(W/2.0, 90.0), "hp":1450.0, "max_hp":1450.0, "radius":35.0, "attack":1.9, "warning":0.0, "phase":0, "aim_y":0.0}
+		boss = {"position":Vector2(W/2.0, 90.0), "hp":4350.0, "max_hp":4350.0, "radius":35.0, "attack":1.9, "warning":0.0, "phase":0, "aim_y":0.0, "special_thresholds":[0.7, 0.3], "special_state":"", "special_timer":0.0, "special_target":Vector2(W/2.0, H/2.0), "special_face":1.0, "damage_reduction":0.0, "stagger_timer":0.0, "counter_window":0.0, "counter_success":false}
 		boss_bar.show()
 	elif not GAME_DATA.BOSS_STAGES.has(stage_id) and enemies.is_empty():
 		finish(true)
@@ -2174,17 +2185,28 @@ func _segment_distance(point: Vector2, start: Vector2, finish: Vector2) -> float
 func _update_boss(delta: float) -> void:
 	boss.flash = maxf(0.0, float(boss.get("flash", 0.0)) - delta)
 	boss.hit_time = maxf(0.0, float(boss.get("hit_time", 0.0)) - delta)
+	if _boss_try_start_special():
+		return
+	var special_state := str(boss.get("special_state", ""))
+	if special_state != "":
+		_update_boss_special(delta, special_state)
+		return
+	if float(boss.get("stagger_timer", 0.0)) > 0.0:
+		boss.stagger_timer = maxf(0.0, float(boss.stagger_timer) - delta)
+		boss.damage_reduction = 0.0
+		boss.attack = 0.5
+		return
 	boss.attack -= delta
 	if boss.warning > 0.0:
 		boss.warning -= delta
 		if boss.warning <= 0.0:
 			if boss.phase == 1:
 				if absf(player_position.y - float(boss.aim_y)) < 42.0:
-					_hurt(42.0)
+					_hurt(60.0)
 				boss.position.y = clampf(boss.position.y + rng.randf_range(-85.0, 85.0), 65.0, H - 70.0)
 			else:
 				if player_position.distance_to(boss.position) < 100.0:
-					_hurt(38.0)
+					_hurt(65.0)
 				_burst(boss.position, Color("ad4a3e"), 20)
 			boss.attack = 1.8
 	elif boss.attack <= 0.0:
@@ -2195,11 +2217,97 @@ func _update_boss(delta: float) -> void:
 		boss.position = boss.position.move_toward(player_position, 35.0 * delta)
 
 
+func _boss_try_start_special() -> bool:
+	var thresholds: Array = boss.get("special_thresholds", [])
+	var ratio := float(boss.hp) / maxf(float(boss.max_hp), 1.0)
+	for index in range(thresholds.size()):
+		if ratio <= float(thresholds[index]):
+			thresholds.remove_at(index)
+			boss.special_thresholds = thresholds
+			boss.special_state = "gather"
+			boss.special_timer = 0.0
+			boss.special_target = Vector2(W * 0.5, H * 0.5)
+			boss.damage_reduction = 0.9
+			boss.warning = 0.0
+			boss_mechanic_message = "보스가 강력한 공격을 준비중입니다"
+			boss_mechanic_message_timer = 5.0
+			return true
+	return false
+
+
+func _update_boss_special(delta: float, special_state: String) -> void:
+	boss.attack = 1.0
+	boss.special_timer = float(boss.special_timer) + delta
+	if special_state == "gather":
+		boss.position = boss.position.move_toward(Vector2(W * 0.5, H * 0.5), 260.0 * delta)
+		if boss.position.distance_to(Vector2(W * 0.5, H * 0.5)) <= 3.0:
+			boss.position = Vector2(W * 0.5, H * 0.5)
+			boss.special_state = "charge"
+			boss.special_timer = 0.0
+			boss.special_face = 1.0 if player_position.x >= boss.position.x else -1.0
+			boss.counter_success = false
+			boss_mechanic_message = "보스가 강력한 공격을 준비중입니다"
+			boss_mechanic_message_timer = 5.0
+		return
+	if special_state == "charge":
+		boss.counter_window = maxf(0.0, float(boss.get("counter_window", 0.0)) - delta)
+		if float(boss.special_timer) >= 5.0:
+			boss.special_state = "slam"
+			boss.special_timer = 0.0
+			boss.counter_window = 0.42
+			boss_mechanic_message = "정확한 타이밍에 G키를 눌러 반격하세요"
+			boss_mechanic_message_timer = 1.25
+			_burst(boss.position, Color("63c7ff"), 22)
+		return
+	if special_state == "slam":
+		boss.counter_window = maxf(0.0, float(boss.get("counter_window", 0.0)) - delta)
+		if float(boss.special_timer) >= 0.62:
+			if bool(boss.get("counter_success", false)):
+				boss.special_state = ""
+				boss.stagger_timer = 4.0
+				boss.damage_reduction = 0.0
+				boss_mechanic_message = "반격 성공! 보스가 무력화되었습니다 · 피해 2배"
+				boss_mechanic_message_timer = 3.0
+				_burst(boss.position, Color("82d8ff"), 36)
+			else:
+				_hurt(player_max_hp)
+				boss.special_state = "recover"
+				boss.special_timer = 0.0
+				boss_mechanic_message = "전방 내려찍기! 다음 공격을 피하세요"
+				boss_mechanic_message_timer = 1.6
+				_burst(Vector2(W * 0.5, H * 0.5), Color("bf493d"), 45)
+		return
+	if special_state == "recover" and float(boss.special_timer) >= 1.0:
+		boss.special_state = ""
+		boss.special_timer = 0.0
+		boss.damage_reduction = 0.0
+		boss.attack = 1.1
+
+
+func _try_boss_counter() -> void:
+	if boss.is_empty() or str(boss.get("special_state", "")) != "slam":
+		return
+	if float(boss.get("counter_window", 0.0)) <= 0.0 or bool(boss.get("counter_success", false)):
+		return
+	var facing_boss := 1.0 if player_position.x >= boss.position.x else -1.0
+	var front_distance := (player_position.x - boss.position.x) * float(boss.special_face)
+	if front_distance <= 0.0 or front_distance > 175.0 or absf(player_position.y - boss.position.y) > 100.0:
+		return
+	boss.counter_success = true
+	boss.counter_window = 0.0
+	boss.special_timer = 0.62
+	boss_mechanic_message = "반격 성공! 보스가 무력화되었습니다 · 피해 2배"
+	boss_mechanic_message_timer = 3.0
+	_burst(boss.position + Vector2(facing_boss * 48.0, 0.0), Color("8adfff"), 24)
+
+
 func _damage_boss(amount: float) -> void:
 	if boss.is_empty():
 		return
 	var boss_damage_bonus := _potential_total(_equipped_item(), "boss_damage")
-	boss.hp -= amount * (1.0 + boss_damage_bonus / 100.0)
+	var stagger_multiplier := 2.0 if float(boss.get("stagger_timer", 0.0)) > 0.0 else 1.0
+	var damage_multiplier := (1.0 - float(boss.get("damage_reduction", 0.0))) * stagger_multiplier
+	boss.hp -= amount * (1.0 + boss_damage_bonus / 100.0) * damage_multiplier
 	boss.flash = 0.15
 	boss.hit_time = 0.15
 	_burst(boss.position, Color("d65a46"), 8)
