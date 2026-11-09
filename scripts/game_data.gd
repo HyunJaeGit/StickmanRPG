@@ -21,7 +21,7 @@ const RARITY_DAMAGE := [1.0, 1.1, 1.22, 1.38, 1.58]
 const RARITY_CHANCES := [60, 25, 10, 4, 1]
 
 const WEAPONS := [
-	{"id":"pencil_sword", "name":"연필검", "desc":"근접 단일 공격 · 가장 가까운 적 1명", "damage_ratio":1.0, "attack_range":185.0},
+	{"id":"pencil_sword", "name":"연필검", "desc":"빠른 근접 단일 공격 · 높은 기본 피해와 강화 할인", "damage_ratio":1.0, "attack_range":185.0, "base_damage_multiplier":1.25, "attack_interval_multiplier":0.75, "enhancement_cost_multiplier":0.75},
 	{"id":"ink_orb", "name":"먹물 구슬", "desc":"유도 투사체 · 적 1명", "damage_ratio":1.0, "attack_range":470.0},
 	{"id":"orbit_line", "name":"회전 선분", "desc":"근접 회전 공격 · 반경 58 안 적 전체", "damage_ratio":0.8, "attack_range":58.0, "area_radius":58.0, "area_center":"player"},
 	{"id":"ruler_spear", "name":"자 대검", "desc":"직선 관통 공격 · 궤적 위 적 전체", "damage_ratio":1.25, "attack_range":340.0},

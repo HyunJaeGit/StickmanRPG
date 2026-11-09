@@ -8,7 +8,10 @@ const GAME_DATA = preload("res://scripts/game_data.gd")
 static func enhancement_cost(item: Dictionary) -> int:
 	var level := int(item.get("enhancement", 0))
 	var rarity := int(item.get("rarity", 0))
-	return 50 * (level + 1) * (level + 1) * (rarity + 1)
+	var base_cost := 50 * (level + 1) * (level + 1) * (rarity + 1)
+	var weapon := _weapon_profile(str(item.get("weapon_id", "")))
+	var cost_multiplier := float(weapon.get("enhancement_cost_multiplier", 1.0))
+	return maxi(1, roundi(float(base_cost) * cost_multiplier))
 
 
 static func enhancement_success_chance(level: int) -> float:
@@ -34,7 +37,9 @@ static func attack_power(item: Dictionary) -> float:
 	var rarity := clampi(int(item.get("rarity", 0)), 0, GAME_DATA.RARITY_DAMAGE.size() - 1)
 	var enhancement := clampi(int(item.get("enhancement", 0)), 0, GAME_DATA.MAX_ENHANCEMENT)
 	var attack_bonus := potential_total(item, "attack")
-	return GAME_DATA.PLAYER_BASE_DAMAGE * float(GAME_DATA.RARITY_DAMAGE[rarity]) * pow(1.1, float(enhancement)) * (1.0 + attack_bonus / 100.0)
+	var weapon := _weapon_profile(str(item.get("weapon_id", "")))
+	var base_damage_multiplier := float(weapon.get("base_damage_multiplier", 1.0))
+	return GAME_DATA.PLAYER_BASE_DAMAGE * base_damage_multiplier * float(GAME_DATA.RARITY_DAMAGE[rarity]) * pow(1.1, float(enhancement)) * (1.0 + attack_bonus / 100.0)
 
 
 static func max_health(item: Dictionary) -> float:
@@ -46,4 +51,13 @@ static func move_speed(item: Dictionary) -> float:
 
 
 static func attack_interval(item: Dictionary) -> float:
-	return GAME_DATA.PLAYER_BASE_ATTACK_INTERVAL * 100.0 / (100.0 + potential_total(item, "attack_speed"))
+	var weapon := _weapon_profile(str(item.get("weapon_id", "")))
+	var interval_multiplier := float(weapon.get("attack_interval_multiplier", 1.0))
+	return GAME_DATA.PLAYER_BASE_ATTACK_INTERVAL * interval_multiplier * 100.0 / (100.0 + potential_total(item, "attack_speed"))
+
+
+static func _weapon_profile(weapon_id: String) -> Dictionary:
+	for weapon in GAME_DATA.WEAPONS:
+		if str(weapon.get("id", "")) == weapon_id:
+			return weapon
+	return {}
