@@ -1595,7 +1595,7 @@ func _confirm_synthesize_equipped_weapon() -> void:
 		return
 	_synthesize_equipped_weapon()
 	var result := _equipped_item()
-	await reward_presentation.play_synthesis_result(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, GAME_DATA.RARITY_NAMES[int(result.get("rarity", rarity + 1))])
+	reward_presentation.play_synthesis_result(_item_icon(_weapon_icon_index(selected_weapon)), weapon_name, GAME_DATA.RARITY_NAMES[int(result.get("rarity", rarity + 1))])
 
 
 func _remove_weapon_uid(uid: int) -> void:
@@ -1809,14 +1809,24 @@ func _update_game(delta: float) -> void:
 		facing = signf(input.x)
 	if attack_timer <= 0.0:
 		_auto_attack()
+		if mode != "playing":
+			return
 		attack_timer = attack_rate
 	_spawn_enemies(delta)
 	_update_enemies(delta)
+	if mode != "playing":
+		return
 	_update_projectiles(delta)
+	if mode != "playing":
+		return
 	_update_drops(delta)
+	if mode != "playing":
+		return
 	_update_particles(delta)
 	if not boss.is_empty():
 		_update_boss(delta)
+	if mode != "playing":
+		return
 	_update_hud()
 
 
@@ -1873,13 +1883,13 @@ func _movement_input() -> Vector2:
 func _spawn_enemy(kind: String) -> void:
 	var angle := rng.randf_range(0.0, TAU)
 	var distance := rng.randf_range(390.0, 520.0)
-	var position := player_position + Vector2(cos(angle), sin(angle)) * distance
-	position.x = clampf(position.x, 22.0, W - 22.0)
-	position.y = clampf(position.y, 22.0, H - 22.0)
+	var spawn_position := player_position + Vector2(cos(angle), sin(angle)) * distance
+	spawn_position.x = clampf(spawn_position.x, 22.0, W - 22.0)
+	spawn_position.y = clampf(spawn_position.y, 22.0, H - 22.0)
 	var data: Dictionary = GAME_DATA.ENEMY_DATA[kind].duplicate(true)
 	var health_scale := 1.0 + float(stage_index) * 0.14
 	data["kind"] = kind
-	data["position"] = position
+	data["position"] = spawn_position
 	data["hp"] *= health_scale
 	data["max_hp"] = data["hp"]
 	data["speed"] *= 1.0 + float(stage_index) * 0.025
@@ -1896,12 +1906,12 @@ func _update_enemies(delta: float) -> void:
 		enemy.attack -= delta
 		enemy.flash = maxf(0.0, enemy.flash - delta)
 		enemy.hit_time = maxf(0.0, float(enemy.get("hit_time", 0.0)) - delta)
-		var position: Vector2 = enemy.position
-		var to_player := player_position - position
+		var enemy_position: Vector2 = enemy.position
+		var to_player := player_position - enemy_position
 		var distance := to_player.length()
 		if enemy.kind == "charger":
 			if enemy.charge > 0.0:
-				position += enemy.velocity * delta
+				enemy_position += enemy.velocity * delta
 				enemy.charge -= delta
 			elif enemy.windup > 0.0:
 				enemy.windup -= delta
@@ -1912,19 +1922,19 @@ func _update_enemies(delta: float) -> void:
 				enemy.windup = 0.5
 				enemy.attack = 2.2
 			else:
-				position += to_player.normalized() * float(enemy.speed) * 0.72 * delta
+				enemy_position += to_player.normalized() * float(enemy.speed) * 0.72 * delta
 		elif enemy.kind == "thrower":
 			if distance > 245.0:
-				position += to_player.normalized() * float(enemy.speed) * delta
+				enemy_position += to_player.normalized() * float(enemy.speed) * delta
 			elif distance < 175.0:
-				position -= to_player.normalized() * float(enemy.speed) * delta
+				enemy_position -= to_player.normalized() * float(enemy.speed) * delta
 			if enemy.attack <= 0.0 and distance < 360.0:
-				projectiles.append({"team":"enemy", "kind":"enemy_orb", "position":position, "velocity":to_player.normalized()*185.0, "life":3.0, "damage":enemy.damage})
+				projectiles.append({"team":"enemy", "kind":"enemy_orb", "position":enemy_position, "velocity":to_player.normalized()*185.0, "life":3.0, "damage":enemy.damage})
 				enemy.attack = 1.8
 		else:
-			position += to_player.normalized() * float(enemy.speed) * delta
-		enemy.position = position
-		if position.distance_to(player_position) < float(enemy.radius) + 13.0:
+			enemy_position += to_player.normalized() * float(enemy.speed) * delta
+		enemy.position = enemy_position
+		if enemy_position.distance_to(player_position) < float(enemy.radius) + 13.0:
 			_hurt(float(enemy.damage) * 0.6)
 
 
@@ -2099,8 +2109,8 @@ func _start_player_animation(row: int, duration: float, weapon_specific: bool = 
 	player_anim_uses_weapon_atlas = weapon_specific
 
 
-func _spawn_player_shot(kind: String, velocity: Vector2, position: Vector2, damage: float, lifetime: float) -> void:
-	projectiles.append({"team":"player", "kind":kind, "position":position, "velocity":velocity, "life":lifetime, "damage":damage, "returning":false})
+func _spawn_player_shot(kind: String, velocity: Vector2, shot_origin: Vector2, damage: float, lifetime: float) -> void:
+	projectiles.append({"team":"player", "kind":kind, "position":shot_origin, "velocity":velocity, "life":lifetime, "damage":damage, "returning":false})
 
 
 func _effective_damage() -> float:
@@ -2176,8 +2186,8 @@ func dash() -> void:
 	_burst(player_position, Color("69c5bd"), 7)
 
 
-func _segment_distance(point: Vector2, start: Vector2, finish: Vector2) -> float:
-	var segment := finish - start
+func _segment_distance(point: Vector2, start: Vector2, endpoint: Vector2) -> float:
+	var segment := endpoint - start
 	var amount := clampf((point - start).dot(segment) / maxf(segment.length_squared(), 0.001), 0.0, 1.0)
 	return point.distance_to(start + segment * amount)
 
@@ -2271,6 +2281,8 @@ func _update_boss_special(delta: float, special_state: String) -> void:
 				_burst(boss.position, Color("82d8ff"), 36)
 			else:
 				_hurt(player_max_hp)
+				if mode != "playing" or boss.is_empty():
+					return
 				boss.special_state = "recover"
 				boss.special_timer = 0.0
 				boss_mechanic_message = "전방 내려찍기! 다음 공격을 피하세요"
@@ -2290,7 +2302,7 @@ func _try_boss_counter() -> void:
 	if float(boss.get("counter_window", 0.0)) <= 0.0 or bool(boss.get("counter_success", false)):
 		return
 	var facing_boss := 1.0 if player_position.x >= boss.position.x else -1.0
-	var front_distance := (player_position.x - boss.position.x) * float(boss.special_face)
+	var front_distance: float = (player_position.x - boss.position.x) * float(boss.special_face)
 	if front_distance <= 0.0 or front_distance > 175.0 or absf(player_position.y - boss.position.y) > 100.0:
 		return
 	boss.counter_success = true
@@ -2379,8 +2391,8 @@ func _update_hud() -> void:
 		boss_bar.value = boss.hp
 
 
-func _burst(position: Vector2, color: Color, amount: int) -> void:
+func _burst(burst_origin: Vector2, color: Color, amount: int) -> void:
 	for index in amount:
 		var angle := rng.randf_range(0.0, TAU)
 		var speed := rng.randf_range(25.0, 130.0)
-		particles.append({"position":position, "velocity":Vector2(cos(angle), sin(angle))*speed, "life":rng.randf_range(0.18, 0.5), "color":color, "radius":rng.randf_range(1.5, 4.0)})
+		particles.append({"position":burst_origin, "velocity":Vector2(cos(angle), sin(angle))*speed, "life":rng.randf_range(0.18, 0.5), "color":color, "radius":rng.randf_range(1.5, 4.0)})

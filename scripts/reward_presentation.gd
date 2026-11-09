@@ -194,7 +194,7 @@ func animate_enhancement(weapon_icon: Texture2D, weapon_name: String, old_level:
 	sparks.add_theme_font_size_override("font_size", 24)
 	content.add_child(sparks)
 	for step in 10:
-		status.text = ["강화석을 정렬합니다", "연필심을 벼립니다", "마력을 두드립니다", "마지막 불꽃을 더합니다"][mini(3, step / 3)]
+		status.text = ["강화석을 정렬합니다", "연필심을 벼립니다", "마력을 두드립니다", "마지막 불꽃을 더합니다"][mini(3, floori(float(step) / 3.0))]
 		progress.value = float(step + 1) * 10.0
 		icon.rotation = rng.randf_range(-0.08, 0.08)
 		icon.scale = Vector2.ONE * rng.randf_range(0.94, 1.06)
@@ -291,7 +291,7 @@ func animate_enhancement_attempt(old_level: int, next_level: int, succeeded: boo
 	_enhancement_set_busy(true)
 	for step in 10:
 		enhancement_progress.value = float(old_level) + float(step + 1) / 10.0 if succeeded else float(old_level)
-		enhancement_status.text = ["별의 기운을 모읍니다", "강화석을 두드립니다", "무기에 힘을 새깁니다", "결과를 확인합니다"][mini(3, step / 3)]
+		enhancement_status.text = ["별의 기운을 모읍니다", "강화석을 두드립니다", "무기에 힘을 새깁니다", "결과를 확인합니다"][mini(3, floori(float(step) / 3.0))]
 		enhancement_icon.rotation = rng.randf_range(-0.08, 0.08)
 		enhancement_icon.scale = Vector2.ONE * rng.randf_range(0.94, 1.07)
 		if is_instance_valid(enhancement_sparks):
