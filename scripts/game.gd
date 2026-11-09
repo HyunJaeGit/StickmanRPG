@@ -786,7 +786,7 @@ func _build_lobby_section() -> Control:
 			for index in RARITY_NAMES.size():
 				var chance_card := _lobby_card(chance_row, Color("f7efdf"), rarity_colors[index])
 				chance_card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			chance_card.custom_minimum_size.y = 50.0
+				chance_card.custom_minimum_size.y = 50.0
 				var chance_info := VBoxContainer.new()
 				chance_info.alignment = BoxContainer.ALIGNMENT_CENTER
 				chance_card.add_child(chance_info)
@@ -1028,7 +1028,7 @@ func _build_lobby_section() -> Control:
 			controls.add_theme_font_size_override("font_size", 19)
 			body.add_child(controls)
 			var help_text := Label.new()
-		help_text.text = "이동  ·  WASD 또는 방향키\n대시  ·  Space\n공격  ·  자동 공격\n스킬 슬롯  ·  Q / W / E / R\n일시 정지  ·  Esc\n\n스테이지의 적을 모두 처치하면 클리어합니다. 보스 스테이지에서는 일반 적을 정리한 뒤 보스까지 처치하세요. 골드와 조각을 모아 무기와 스킬을 성장시킬 수 있습니다."
+			help_text.text = "이동  ·  WASD 또는 방향키\n대시  ·  Space\n공격  ·  자동 공격\n스킬 슬롯  ·  Q / W / E / R\n일시 정지  ·  Esc\n\n스테이지의 적을 모두 처치하면 클리어합니다. 보스 스테이지에서는 일반 적을 정리한 뒤 보스까지 처치하세요. 골드와 조각을 모아 무기와 스킬을 성장시킬 수 있습니다."
 			help_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			help_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			body.add_child(help_text)
