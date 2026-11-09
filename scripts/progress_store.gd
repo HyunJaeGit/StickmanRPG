@@ -6,6 +6,16 @@ const SAVE_PATH := "user://stickman_rpg.cfg"
 const SETTINGS_PATH := "user://stickman_settings.cfg"
 
 
+static func has_progress() -> bool:
+	return bool(load_progress().get("_has_save", false))
+
+
+static func clear_progress() -> Error:
+	if not has_progress():
+		return OK
+	return DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+
+
 static func load_progress() -> Dictionary:
 	var config := ConfigFile.new()
 	if config.load(SAVE_PATH) != OK:

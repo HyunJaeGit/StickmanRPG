@@ -6,6 +6,7 @@ const H := 540.0
 const GAME_DATA = preload("res://scripts/game_data.gd")
 const WEAPON_RULES = preload("res://scripts/weapon_rules.gd")
 const LOBBY_VIEW_SCRIPT = preload("res://scripts/lobby_view.gd")
+const TITLE_SCREEN_SCRIPT = preload("res://scripts/title_screen.gd")
 const RENDERER_SCENE: PackedScene = preload("res://scenes/game_renderer.tscn")
 const REWARD_PRESENTATION_SCENE: PackedScene = preload("res://scenes/reward_presentation.tscn")
 const CHARACTER_ATLAS: Texture2D = preload("res://art/stickman_characters_atlas.png")
@@ -18,7 +19,7 @@ const MAGIC_SKILL_CELL := Vector2(2172.0 / 5.0, 434.0)
 const MAGIC_SKILL_REGION_Y := 145.0
 const ACTION_FRAME_SIZE := Vector2(362.0, 271.5)
 
-var mode := "lobby"
+var mode := "title"
 var stage_index := 0
 var furthest_stage_index := 0
 var gold := 0
@@ -80,6 +81,7 @@ var rng := RandomNumberGenerator.new()
 var game_renderer: GameRenderer
 var reward_presentation: RewardPresentation
 var lobby_view: LobbyView
+var title_screen: Control
 var ui: CanvasLayer
 var hud_label: Label
 var hp_bar: ProgressBar
@@ -102,7 +104,6 @@ var selected_skill_slot := -1
 
 func _ready() -> void:
 	rng.randomize()
-	_load_progress()
 	_load_settings()
 	game_renderer = RENDERER_SCENE.instantiate() as GameRenderer
 	game_renderer.game = self
@@ -111,7 +112,7 @@ func _ready() -> void:
 	reward_presentation.closed.connect(_on_reward_presentation_closed)
 	add_child(reward_presentation)
 	_build_ui()
-	show_lobby()
+	_show_title_screen()
 	game_renderer.queue_redraw()
 
 
@@ -283,6 +284,13 @@ func _build_ui() -> void:
 	lobby_view.stage_requested.connect(_select_lobby_stage)
 	lobby_view.theme = ui_theme
 	ui.add_child(lobby_view)
+	title_screen = TITLE_SCREEN_SCRIPT.new() as Control
+	title_screen.theme = ui_theme
+	title_screen.connect("continue_requested", _load_saved_game)
+	title_screen.connect("new_game_requested", _request_new_game)
+	title_screen.connect("settings_requested", func(): _open_lobby_window("settings"))
+	title_screen.connect("exit_requested", _confirm_exit_game)
+	ui.add_child(title_screen)
 	overlay.hide()
 
 
@@ -355,9 +363,107 @@ func _show_unowned_skill_info(skill: Dictionary) -> void:
 	_show_catalog_info("스킬 정보", info)
 
 
+func _show_title_screen() -> void:
+	mode = "title"
+	get_tree().paused = false
+	lobby_view.hide()
+	skill_hud.visible = false
+	overlay.hide()
+	title_screen.call("show_screen", ProgressStore.has_progress())
+
+
+func _reset_progress_memory() -> void:
+	stage_index = 0
+	furthest_stage_index = 0
+	gold = 0
+	weapon_shards = 0
+	magic_shards = 0
+	skills_owned.clear()
+	equipped_skill_slots = ["", "", "", ""]
+	skill_levels.clear()
+	skill_cooldowns.clear()
+	selected_weapon = "pencil_sword"
+	selected_weapon_uid = 1
+	next_weapon_uid = 1
+	weapon_inventory.clear()
+	last_weapon_draw.clear()
+	cleared_stages.clear()
+	selected_skill_slot = -1
+	lobby_section = "home"
+	last_lobby_message = "새 모험을 시작합니다."
+
+
+func _load_saved_game() -> void:
+	if not ProgressStore.has_progress():
+		_show_title_screen()
+		return
+	get_tree().paused = false
+	_reset_progress_memory()
+	_load_progress()
+	_reset_run()
+	last_lobby_message = "저장된 모험을 불러왔습니다."
+	show_lobby()
+
+
+func _request_new_game() -> void:
+	if ProgressStore.has_progress():
+		_show_confirmation("새 게임", "기존 진행 상황을 삭제하고 처음부터 시작할까요?\n설정은 유지됩니다.", "새 게임 시작", _begin_new_game)
+	else:
+		_begin_new_game()
+
+
+func _begin_new_game() -> void:
+	get_tree().paused = false
+	var clear_result := ProgressStore.clear_progress()
+	if clear_result != OK:
+		_show_panel("새 게임을 시작할 수 없습니다", "저장 파일을 초기화하지 못했습니다. 오류 코드: %s" % clear_result, "확인", func(): overlay.hide())
+		return
+	_reset_progress_memory()
+	_load_progress()
+	_reset_run()
+	last_lobby_message = "새 게임을 시작합니다."
+	_save_progress()
+	show_lobby()
+
+
+func _confirm_load_game() -> void:
+	if not ProgressStore.has_progress():
+		return
+	_show_confirmation("저장 불러오기", "현재 전투를 끝내고 저장된 진행 상황을 불러올까요?\n전투 중 위치와 적 상태는 저장되지 않습니다.", "불러오기", _load_saved_game)
+
+
+func _return_to_title() -> void:
+	get_tree().paused = false
+	_save_progress()
+	_reset_run()
+	_show_title_screen()
+
+
+func _confirm_return_to_title() -> void:
+	_show_confirmation("타이틀 화면", "진행 상황을 저장하고 현재 전투를 끝낸 뒤 타이틀로 돌아갈까요?", "타이틀로", _return_to_title)
+
+
+func _show_confirmation(title: String, message: String, confirm_text: String, callback: Callable) -> void:
+	var dialog := ConfirmationDialog.new()
+	dialog.title = title
+	dialog.dialog_text = message
+	dialog.ok_button_text = confirm_text
+	dialog.cancel_button_text = "취소"
+	dialog.theme = title_screen.theme
+	dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	dialog.confirmed.connect(func():
+		callback.call()
+		dialog.queue_free()
+	)
+	dialog.close_requested.connect(dialog.queue_free)
+	ui.add_child(dialog)
+	dialog.popup_centered(Vector2i(500, 220))
+
+
 func show_lobby() -> void:
 	mode = "lobby"
 	lobby_section = "home"
+	title_screen.hide()
 	skill_hud.visible = false
 	get_tree().paused = false
 	overlay.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -458,6 +564,7 @@ func _lobby_card(parent: Control, color: Color, edge: Color = Color("5d6662")) -
 
 func _open_lobby_window(section: String) -> void:
 	lobby_view.hide()
+	title_screen.hide()
 	lobby_section = section
 	if section == "skills" and selected_skill_slot < 0:
 		selected_skill_slot = 0
@@ -514,7 +621,11 @@ func _close_lobby_window() -> void:
 	lobby_section = "home"
 	lobby_modal_body = null
 	overlay_panel.custom_minimum_size = Vector2(840.0, 430.0)
-	show_lobby()
+	if mode == "title":
+		overlay.hide()
+		title_screen.call("show_screen", ProgressStore.has_progress())
+	else:
+		show_lobby()
 
 
 func _load_settings() -> void:
@@ -1611,7 +1722,7 @@ func _load_progress() -> void:
 		_save_progress()
 
 
-func _save_progress() -> void:
+func _save_progress() -> Error:
 	var progress := {
 		"stage_index":stage_index,
 		"furthest_stage_index":furthest_stage_index,
@@ -1629,6 +1740,7 @@ func _save_progress() -> void:
 	var result := ProgressStore.save_progress(progress)
 	if result != OK:
 		push_warning("진행 정보를 저장하지 못했습니다. 오류 코드: %s" % result)
+	return result
 
 
 func show_pause() -> void:
@@ -1641,8 +1753,43 @@ func show_pause() -> void:
 		overlay.hide()
 	)
 	var content := overlay_panel.get_child(0) as VBoxContainer
+	var save_row := HBoxContainer.new()
+	save_row.add_theme_constant_override("separation", 8)
+	content.add_child(save_row)
+	var save_button := Button.new()
+	save_button.text = "저장하기"
+	save_button.custom_minimum_size.y = 38.0
+	save_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	save_button.pressed.connect(func():
+		var save_result := _save_progress()
+		save_button.text = "저장 완료" if save_result == OK else "저장 실패 · 오류 %s" % save_result
+	)
+	save_row.add_child(save_button)
+	var load_button := Button.new()
+	load_button.text = "불러오기"
+	load_button.custom_minimum_size.y = 38.0
+	load_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	load_button.disabled = not ProgressStore.has_progress()
+	load_button.pressed.connect(_confirm_load_game)
+	save_row.add_child(load_button)
+	var menu_row := HBoxContainer.new()
+	menu_row.add_theme_constant_override("separation", 8)
+	content.add_child(menu_row)
+	var new_game_button := Button.new()
+	new_game_button.text = "새 게임"
+	new_game_button.custom_minimum_size.y = 38.0
+	new_game_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	new_game_button.pressed.connect(_request_new_game)
+	menu_row.add_child(new_game_button)
+	var title_button := Button.new()
+	title_button.text = "타이틀로"
+	title_button.custom_minimum_size.y = 38.0
+	title_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_button.pressed.connect(_confirm_return_to_title)
+	menu_row.add_child(title_button)
 	var quit_button := Button.new()
 	quit_button.text = "전투 포기"
+	quit_button.custom_minimum_size.y = 38.0
 	quit_button.pressed.connect(func():
 		get_tree().paused = false
 		finish(false)

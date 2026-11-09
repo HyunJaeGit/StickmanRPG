@@ -36,7 +36,7 @@ func _draw() -> void:
 		_draw_boss()
 	for particle in game.particles:
 		draw_circle(particle.position, particle.radius, particle.color)
-	if game.mode == "lobby":
+	if game.mode in ["lobby", "title"]:
 		_draw_character(Vector2(W/2.0, H/2.0+20.0), Vector2(95.0, 118.0), 0)
 	else:
 		_draw_player()
